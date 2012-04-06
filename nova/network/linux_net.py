@@ -90,6 +90,7 @@ FLAGS.register_opts(linux_net_opts)
 #             so we limit it to 16 characters.
 #             (max_chain_name_length - len('-POSTROUTING') == 16)
 binary_name = os.path.basename(inspect.stack()[-1][1])[:16]
+l3rule_str = '-A FORWARD -j l3-linux-FORWARD'
 
 
 class IptablesRule(object):
@@ -365,6 +366,13 @@ class IptablesManager(object):
             our_rules += [rule_str]
 
         new_filter[rules_index:rules_index] = our_rules
+
+        l3rule = filter(lambda s: s.strip() == l3rule_str.strip(),
+                                    new_filter)
+        if l3rule:
+            new_filter = filter(lambda s: s.strip() != l3rule_str.strip(),
+                                    new_filter)
+            new_filter[rules_index:rules_index] = [l3rule_str]
 
         new_filter[rules_index:rules_index] = [':%s - [0:0]' % (name,)
                                                for name in unwrapped_chains]
