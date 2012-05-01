@@ -457,9 +457,9 @@ def fixed_ip_get_network(context, address):
     return IMPL.fixed_ip_get_network(context, address)
 
 
-def fixed_ip_update(context, address, values):
+def fixed_ip_update(context, address, values, network_id=None):
     """Create a fixed ip from the values dictionary."""
-    return IMPL.fixed_ip_update(context, address, values)
+    return IMPL.fixed_ip_update(context, address, values, network_id=network_id)
 
 ####################
 
@@ -1707,14 +1707,14 @@ def aggregate_create(context, values, metadata=None):
     return IMPL.aggregate_create(context, values, metadata)
 
 
-def aggregate_get(context, aggregate_id):
+def aggregate_get(context, aggregate_id, **kwargs):
     """Get a specific aggregate by id."""
-    return IMPL.aggregate_get(context, aggregate_id)
+    return IMPL.aggregate_get(context, aggregate_id, **kwargs)
 
 
-def aggregate_get_by_host(context, host):
+def aggregate_get_by_host(context, host, **kwargs):
     """Get a specific aggregate by host"""
-    return IMPL.aggregate_get_by_host(context, host)
+    return IMPL.aggregate_get_by_host(context, host, **kwargs)
 
 
 def aggregate_update(context, aggregate_id, values):
@@ -1728,9 +1728,9 @@ def aggregate_delete(context, aggregate_id):
     return IMPL.aggregate_delete(context, aggregate_id)
 
 
-def aggregate_get_all(context):
+def aggregate_get_all(context, **kwargs):
     """Get all aggregates."""
-    return IMPL.aggregate_get_all(context)
+    return IMPL.aggregate_get_all(context, **kwargs)
 
 
 def aggregate_metadata_add(context, aggregate_id, metadata, set_delete=False):
@@ -1738,9 +1738,9 @@ def aggregate_metadata_add(context, aggregate_id, metadata, set_delete=False):
     IMPL.aggregate_metadata_add(context, aggregate_id, metadata, set_delete)
 
 
-def aggregate_metadata_get(context, aggregate_id):
+def aggregate_metadata_get(context, aggregate_id, **kwargs):
     """Get metadata for the specified aggregate."""
-    return IMPL.aggregate_metadata_get(context, aggregate_id)
+    return IMPL.aggregate_metadata_get(context, aggregate_id, **kwargs)
 
 
 def aggregate_metadata_delete(context, aggregate_id, key):
@@ -1753,9 +1753,9 @@ def aggregate_host_add(context, aggregate_id, host):
     IMPL.aggregate_host_add(context, aggregate_id, host)
 
 
-def aggregate_host_get_all(context, aggregate_id):
+def aggregate_host_get_all(context, aggregate_id, **kwargs):
     """Get hosts for the specified aggregate."""
-    return IMPL.aggregate_host_get_all(context, aggregate_id)
+    return IMPL.aggregate_host_get_all(context, aggregate_id, **kwargs)
 
 
 def aggregate_host_delete(context, aggregate_id, host):

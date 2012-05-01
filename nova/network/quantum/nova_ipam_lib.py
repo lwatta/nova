@@ -132,7 +132,7 @@ class QuantumNovaIPAMLib(object):
                                                  vif_rec['instance_id'])
             values = {'allocated': True,
                       'virtual_interface_id': vif_rec['id']}
-            db.fixed_ip_update(admin_context, address, values)
+            db.fixed_ip_update(admin_context, address, values, network['id'])
         return [address]
 
     def get_tenant_id_by_net_id(self, context, net_id, vif_id, project_id):
@@ -218,7 +218,7 @@ class QuantumNovaIPAMLib(object):
                                {'allocated': False,
                                 'virtual_interface_id': None})
         if len(fixed_ips) == 0:
-            LOG.error(_('No fixed IPs to deallocate for vif %s'),
+            LOG.error(_('No fixed IPs to deallocate for vif %s') %
                       vif_ref['id'])
 
     def get_allocated_ips(self, context, subnet_id, project_id):

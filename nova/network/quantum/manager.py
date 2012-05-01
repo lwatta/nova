@@ -358,7 +358,8 @@ class QuantumManager(manager.FloatingIP, manager.FlatManager):
         return self.get_instance_nw_info(context, instance_id,
                                          instance['uuid'],
                                          rxtx_factor, host,
-                                         project_id=project_id)
+                                         project_id=project_id,
+                                         dhcp_server=str(network['dhcp_server']))
 
     def get_network(self, context, proj_pair):
         (quantum_net_id, net_tenant_id) = proj_pair
@@ -403,9 +404,9 @@ class QuantumManager(manager.FloatingIP, manager.FlatManager):
 
     @manager.wrap_check_policy
     def get_instance_uuids_by_ip_filter(self, context, filters):
-        # This is not returning the instance IDs like the method name
-        # would make you think; it is matching the return format of
-        # the method it's overriding.
+        # This is not returning the instance IDs like the method name would
+        # make you think, its matching the return format of the method it's
+        # overriding.
         instance_ids = self.ipam.get_instance_ids_by_ip_address(
                                     context, filters.get('ip'))
         instances = [db.instance_get(context, id) for id in instance_ids]
@@ -435,7 +436,7 @@ class QuantumManager(manager.FloatingIP, manager.FlatManager):
             network_ref['cidr'] = subnet['cidr']
             n = netaddr.IPNetwork(subnet['cidr'])
             # NOTE(tr3buchet): should probably not always assume first+1
-            network_ref['dhcp_server'] = netaddr.IPAddress(n.first + 1)
+            network_ref['dhcp_server'] = netaddr.IPAddress(n.first + network_ref['id'] + 10)
             # TODO(bgh): Melange should probably track dhcp_start
             # TODO(tr3buchet): melange should store dhcp_server as well
             if (not 'dhcp_start' in network_ref or
@@ -510,6 +511,7 @@ class QuantumManager(manager.FloatingIP, manager.FlatManager):
            in the future.
         """
         project_id = kwargs['project_id']
+        dhcp_server = kwargs.get('dhcp_server')
         vifs = db.virtual_interface_get_by_instance(context, instance_id)
 
         net_tenant_dict = dict((net_id, tenant_id)
@@ -528,7 +530,8 @@ class QuantumManager(manager.FloatingIP, manager.FlatManager):
                            'bridge': '',  # Quantum ignores this field
                            'label': network['label'],
                            'injected': FLAGS.flat_injected,
-                           'project_id': net_tenant_id}
+                           'project_id': net_tenant_id,
+                           'dhcp_server': dhcp_server}
                 networks[vif['uuid']] = network
 
         # update instance network cache and return network_info
@@ -625,7 +628,7 @@ class QuantumManager(manager.FloatingIP, manager.FlatManager):
             if subnet['cidr']:
                 network_ref['cidr'] = subnet['cidr']
             n = netaddr.IPNetwork(network_ref['cidr'])
-            network_ref['dhcp_server'] = netaddr.IPAddress(n.first + 1)
+            network_ref['dhcp_server'] = netaddr.IPAddress(n.first + network_ref['id'] + 10)
             network_ref['dhcp_start'] = netaddr.IPAddress(n.first + 2)
             network_ref['broadcast'] = netaddr.IPAddress(n.broadcast)
             network_ref['gateway'] = netaddr.IPAddress(n.first + 1)

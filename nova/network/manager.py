@@ -55,6 +55,7 @@ import netaddr
 
 from nova.compute import api as compute_api
 from nova import context
+from nova import db
 from nova import exception
 from nova import flags
 from nova import ipv6
@@ -296,7 +297,8 @@ class FloatingIP(object):
                     self.l3driver.add_floating_ip(floating_ip['address'],
                             fixed_address, floating_ip['interface'])
                 except exception.ProcessExecutionError:
-                    LOG.debug(_('Interface %(interface)s not found'), locals())
+                    msg = _('Interface %(interface)s not found') % locals()
+                    LOG.debug(msg)
                     raise exception.NoFloatingIpInterface(interface=interface)
 
     @wrap_check_policy
@@ -491,7 +493,8 @@ class FloatingIP(object):
             fixed_address = self.db.floating_ip_disassociate(context,
                                                              floating_address)
             if "Cannot find device" in str(e):
-                LOG.error(_('Interface %(interface)s not found'), locals())
+                msg = _('Interface %(interface)s not found') % locals()
+                LOG.error(msg)
                 raise exception.NoFloatingIpInterface(interface=interface)
 
     @wrap_check_policy
@@ -979,7 +982,7 @@ class NetworkManager(manager.SchedulerDependentManager):
             # get network dict for vif from args and build the subnets
             network = networks[vif['uuid']]
             subnets = self._get_subnets_from_network(context, network, vif,
-                                                             instance_host)
+                                                             instance_host,network['dhcp_server'])
 
             # if rxtx_cap data are not set everywhere, set to none
             try:
@@ -1051,7 +1054,7 @@ class NetworkManager(manager.SchedulerDependentManager):
         return network_dict
 
     def _get_subnets_from_network(self, context, network,
-                                  vif, instance_host=None):
+                                  vif, instance_host=None, real_dhcp_server=None):
         """Returns the 1 or 2 possible subnets for a nova network"""
         # get subnets
         ipam_subnets = self.ipam.get_subnets_by_net_id(context,
@@ -1071,7 +1074,8 @@ class NetworkManager(manager.SchedulerDependentManager):
                 else:
                     dhcp_server = self._get_dhcp_ip(context, subnet)
                 subnet_dict['dhcp_server'] = dhcp_server
-
+            if real_dhcp_server is not None:
+                subnet_dict['dhcp_server'] = real_dhcp_server
             subnet_object = network_model.Subnet(**subnet_dict)
 
             # add dns info
@@ -1197,11 +1201,10 @@ class NetworkManager(manager.SchedulerDependentManager):
 
     def deallocate_fixed_ip(self, context, address, **kwargs):
         """Returns a fixed ip to the pool."""
-        fixed_ip_ref = self.db.fixed_ip_get_by_address(context, address)
-        vif_id = fixed_ip_ref['virtual_interface_id']
         self.db.fixed_ip_update(context, address,
                                 {'allocated': False,
                                  'virtual_interface_id': None})
+        fixed_ip_ref = self.db.fixed_ip_get_by_address(context, address)
         instance_id = fixed_ip_ref['instance_id']
         self._do_trigger_security_group_members_refresh_for_instance(
                                                                    instance_id)
@@ -1217,24 +1220,12 @@ class NetworkManager(manager.SchedulerDependentManager):
 
         if FLAGS.force_dhcp_release:
             dev = self.driver.get_dev(network)
-            # NOTE(vish): The below errors should never happen, but there may
-            #             be a race condition that is causing them per
-            #             https://code.launchpad.net/bugs/968457, so we log
-            #             an error to help track down the possible race.
-            msg = _("Unable to release %s because vif doesn't exist.")
-            if not vif_id:
-                LOG.error(msg % address)
-                return
-
-            vif = self.db.virtual_interface_get(context, vif_id)
-
-            if not vif:
-                LOG.error(msg % address)
-                return
-
+            vif = self.db.virtual_interface_get_by_instance_and_network(
+                    context, instance_id, network['id'])
             # NOTE(vish): This forces a packet so that the release_fixed_ip
             #             callback will get called by nova-dhcpbridge.
-            self.driver.release_dhcp(dev, address, vif['address'])
+            if vif:
+                self.driver.release_dhcp(dev, address, vif['address'])
 
     def lease_fixed_ip(self, context, address):
         """Called by dhcp-bridge when ip is leased."""
@@ -1317,33 +1308,33 @@ class NetworkManager(manager.SchedulerDependentManager):
                 if next_subnet in fixed_net_v4:
                     return next_subnet
 
-            for subnet in list(subnets_v4):
-                if subnet in used_subnets:
-                    next_subnet = find_next(subnet)
-                    if next_subnet:
-                        subnets_v4.remove(subnet)
-                        subnets_v4.append(next_subnet)
-                        subnet = next_subnet
-                    else:
-                        raise ValueError(_('cidr already in use'))
-                for used_subnet in used_subnets:
-                    if subnet in used_subnet:
-                        msg = _('requested cidr (%(cidr)s) conflicts with '
-                                'existing supernet (%(super)s)')
-                        raise ValueError(msg % {'cidr': subnet,
-                                                'super': used_subnet})
-                    if used_subnet in subnet:
-                        next_subnet = find_next(subnet)
-                        if next_subnet:
-                            subnets_v4.remove(subnet)
-                            subnets_v4.append(next_subnet)
-                            subnet = next_subnet
-                        else:
-                            msg = _('requested cidr (%(cidr)s) conflicts '
-                                    'with existing smaller cidr '
-                                    '(%(smaller)s)')
-                            raise ValueError(msg % {'cidr': subnet,
-                                                    'smaller': used_subnet})
+#            for subnet in list(subnets_v4):
+#                if subnet in used_subnets:
+#                    next_subnet = find_next(subnet)
+#                    if next_subnet:
+#                        subnets_v4.remove(subnet)
+#                        subnets_v4.append(next_subnet)
+#                        subnet = next_subnet
+#                    else:
+#                        raise ValueError(_('cidr already in use'))
+#                for used_subnet in used_subnets:
+#                    if subnet in used_subnet:
+#                        msg = _('requested cidr (%(cidr)s) conflicts with '
+#                                'existing supernet (%(super)s)')
+#                        raise ValueError(msg % {'cidr': subnet,
+#                                                'super': used_subnet})
+#                    if used_subnet in subnet:
+#                        next_subnet = find_next(subnet)
+#                        if next_subnet:
+#                            subnets_v4.remove(subnet)
+#                            subnets_v4.append(next_subnet)
+#                            subnet = next_subnet
+#                        else:
+#                            msg = _('requested cidr (%(cidr)s) conflicts '
+#                                    'with existing smaller cidr '
+#                                    '(%(smaller)s)')
+#                            raise ValueError(msg % {'cidr': subnet,
+#                                                    'smaller': used_subnet})
 
         networks = []
         subnets = itertools.izip_longest(subnets_v4, subnets_v6)
@@ -1411,16 +1402,15 @@ class NetworkManager(manager.SchedulerDependentManager):
             require_disassociated=True):
 
         # Prefer uuid but we'll also take cidr for backwards compatibility
-        elevated = context.elevated()
         if uuid:
-            network = self.db.network_get_by_uuid(elevated, uuid)
+            network = db.network_get_by_uuid(context.elevated(), uuid)
         elif fixed_range:
-            network = self.db.network_get_by_cidr(elevated, fixed_range)
+            network = db.network_get_by_cidr(context.elevated(), fixed_range)
 
         if require_disassociated and network.project_id is not None:
             raise ValueError(_('Network must be disassociated from project %s'
                                ' before delete') % network.project_id)
-        self.db.network_delete_safe(context, network.id)
+        db.network_delete_safe(context, network.id)
 
     @property
     def _bottom_reserved_ips(self):  # pylint: disable=R0201
@@ -1557,7 +1547,12 @@ class NetworkManager(manager.SchedulerDependentManager):
 
     @wrap_check_policy
     def get_network(self, context, network_uuid):
-        network = self.db.network_get_by_uuid(context.elevated(), network_uuid)
+        networks = self._get_networks_by_uuids(context, [network_uuid])
+        try:
+            network = networks[0]
+        except (IndexError, TypeError):
+            raise exception.NetworkNotFound(network_id=network_uuid)
+
         return dict(network.iteritems())
 
     @wrap_check_policy
@@ -1841,7 +1836,7 @@ class VlanManager(RPCAllocateFixedIP, FloatingIP, NetworkManager):
             net = {}
             address = FLAGS.vpn_ip
             net['vpn_public_address'] = address
-            network = self.db.network_update(context, network['id'], net)
+            network = db.network_update(context, network['id'], net)
         else:
             address = network['vpn_public_address']
         network['dhcp_server'] = self._get_dhcp_ip(context, network)

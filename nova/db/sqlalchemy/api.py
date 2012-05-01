@@ -1053,10 +1053,17 @@ def fixed_ip_get_all(context, session=None):
 
 
 @require_context
-def fixed_ip_get_by_address(context, address, session=None):
-    result = model_query(context, models.FixedIp, session=session,
+def fixed_ip_get_by_address(context, address, session=None, network_id=None):
+    if network_id is None:
+        result = model_query(context, models.FixedIp, session=session,
                          read_deleted="yes").\
                      filter_by(address=address).\
+                     first()
+    else:
+        result = model_query(context, models.FixedIp, session=session,
+                         read_deleted="yes").\
+                     filter_by(address=address).\
+                     filter_by(network_id=network_id).\
                      first()
     if not result:
         raise exception.FixedIpNotFoundForAddress(address=address)
@@ -1111,12 +1118,13 @@ def fixed_ip_get_network(context, address):
 
 
 @require_context
-def fixed_ip_update(context, address, values):
+def fixed_ip_update(context, address, values, network_id=None):
     session = get_session()
     with session.begin():
         fixed_ip_ref = fixed_ip_get_by_address(context,
                                                address,
-                                               session=session)
+                                               session=session,
+                                               network_id=network_id)
         fixed_ip_ref.update(values)
         fixed_ip_ref.save(session=session)
 
@@ -1542,7 +1550,7 @@ def instance_get_all_by_reservation(context, reservation_id):
 # NOTE(jkoelker) This is only being left here for compat with floating
 #                ips. Currently the network_api doesn't return floaters
 #                in network_info. Once it starts return the model. This
-#                function and its call in compute/manager.py on 1829 can
+#                function and it's call in compute/manager.py on 1829 can
 #                go away
 @require_context
 def instance_get_floating_address(context, instance_id):
@@ -1907,21 +1915,8 @@ def network_create_safe(context, values):
 def network_delete_safe(context, network_id):
     session = get_session()
     with session.begin():
-        result = session.query(models.FixedIp).\
-                         filter_by(network_id=network_id).\
-                         filter_by(deleted=False).\
-                         filter_by(allocated=True).\
-                         all()
-        if result:
-            raise exception.NetworkInUse(network_id=network_id)
         network_ref = network_get(context, network_id=network_id,
                                   session=session)
-        session.query(models.FixedIp).\
-                filter_by(network_id=network_id).\
-                filter_by(deleted=False).\
-                update({'deleted': True,
-                        'updated_at': literal_column('updated_at'),
-                        'deleted_at': utils.utcnow()})
         session.delete(network_ref)
 
 
@@ -3264,7 +3259,7 @@ def migration_get_all_unconfirmed(context, confirm_window, session=None):
     return model_query(context, models.Migration, session=session,
                        read_deleted="yes").\
             filter(models.Migration.updated_at <= confirm_window).\
-            filter_by(status="finished").\
+            filter_by(status="FINISHED").\
             all()
 
 
@@ -4169,10 +4164,8 @@ def sm_volume_get_all(context):
 ################
 
 
-def _aggregate_get_query(context, model_class, id_field, id,
-                         session=None, read_deleted=None):
-    return model_query(context, model_class, session=session,
-                       read_deleted=read_deleted).filter(id_field == id)
+def _aggregate_get_query(context, model_class, id_field, id, **kwargs):
+    return model_query(context, model_class, **kwargs).filter(id_field == id)
 
 
 @require_admin_context
@@ -4202,11 +4195,12 @@ def aggregate_create(context, values, metadata=None):
 
 
 @require_admin_context
-def aggregate_get(context, aggregate_id):
+def aggregate_get(context, aggregate_id, **kwargs):
     aggregate = _aggregate_get_query(context,
                                      models.Aggregate,
                                      models.Aggregate.id,
-                                     aggregate_id).first()
+                                     aggregate_id,
+                                     **kwargs).first()
 
     if not aggregate:
         raise exception.AggregateNotFound(aggregate_id=aggregate_id)
@@ -4215,16 +4209,18 @@ def aggregate_get(context, aggregate_id):
 
 
 @require_admin_context
-def aggregate_get_by_host(context, host):
+def aggregate_get_by_host(context, host, **kwargs):
     aggregate_host = _aggregate_get_query(context,
                                           models.AggregateHost,
                                           models.AggregateHost.host,
-                                          host).first()
+                                          host,
+                                          **kwargs).first()
 
     if not aggregate_host:
         raise exception.AggregateHostNotFound(host=host)
 
-    return aggregate_get(context, aggregate_host.aggregate_id)
+    return aggregate_get(context, aggregate_host.aggregate_id,
+                         **kwargs)
 
 
 @require_admin_context
@@ -4232,9 +4228,9 @@ def aggregate_update(context, aggregate_id, values):
     session = get_session()
     aggregate = _aggregate_get_query(context,
                                      models.Aggregate,
-                                     models.Aggregate.id,
-                                     aggregate_id,
-                                     session=session).first()
+                                     models.Aggregate.id, aggregate_id,
+                                     session=session,
+                                     read_deleted='no').first()
     if aggregate:
         metadata = values.get('metadata')
         if metadata is not None:
@@ -4255,8 +4251,8 @@ def aggregate_update(context, aggregate_id, values):
 def aggregate_delete(context, aggregate_id):
     query = _aggregate_get_query(context,
                                  models.Aggregate,
-                                 models.Aggregate.id,
-                                 aggregate_id)
+                                 models.Aggregate.id, aggregate_id,
+                                 read_deleted='no')
     if query.first():
         query.update({'deleted': True,
                       'deleted_at': utils.utcnow(),
@@ -4267,16 +4263,20 @@ def aggregate_delete(context, aggregate_id):
 
 
 @require_admin_context
-def aggregate_get_all(context):
-    return model_query(context, models.Aggregate).all()
+def aggregate_get_all(context, **kwargs):
+    if 'read_deleted' not in kwargs:
+        kwargs['read_deleted'] = 'yes'
+    return model_query(context,
+                       models.Aggregate,
+                       **kwargs).all()
 
 
 @require_admin_context
 @require_aggregate_exists
-def aggregate_metadata_get(context, aggregate_id):
+def aggregate_metadata_get(context, aggregate_id, **kwargs):
     rows = model_query(context,
-                       models.AggregateMetadata).\
-                       filter_by(aggregate_id=aggregate_id).all()
+                       models.AggregateMetadata,
+                       **kwargs).filter_by(aggregate_id=aggregate_id).all()
 
     return dict([(r['key'], r['value']) for r in rows])
 
@@ -4287,7 +4287,7 @@ def aggregate_metadata_delete(context, aggregate_id, key):
     query = _aggregate_get_query(context,
                                  models.AggregateMetadata,
                                  models.AggregateMetadata.aggregate_id,
-                                 aggregate_id).\
+                                 aggregate_id, read_deleted='no').\
                                  filter_by(key=key)
     if query.first():
         query.update({'deleted': True,
@@ -4300,7 +4300,8 @@ def aggregate_metadata_delete(context, aggregate_id, key):
 
 @require_admin_context
 @require_aggregate_exists
-def aggregate_metadata_get_item(context, aggregate_id, key, session=None):
+def aggregate_metadata_get_item(context, aggregate_id, key,
+                                session=None):
     result = _aggregate_get_query(context,
                                   models.AggregateMetadata,
                                   models.AggregateMetadata.aggregate_id,
@@ -4350,10 +4351,12 @@ def aggregate_metadata_add(context, aggregate_id, metadata, set_delete=False):
 
 @require_admin_context
 @require_aggregate_exists
-def aggregate_host_get_all(context, aggregate_id):
+def aggregate_host_get_all(context, aggregate_id, **kwargs):
+    if 'read_deleted' not in kwargs:
+        kwargs['read_deleted'] = 'yes'
     rows = model_query(context,
-                       models.AggregateHost).\
-                       filter_by(aggregate_id=aggregate_id).all()
+                       models.AggregateHost,
+                       **kwargs).filter_by(aggregate_id=aggregate_id).all()
 
     return [r.host for r in rows]
 
@@ -4364,7 +4367,8 @@ def aggregate_host_delete(context, aggregate_id, host):
     query = _aggregate_get_query(context,
                                  models.AggregateHost,
                                  models.AggregateHost.aggregate_id,
-                                 aggregate_id).filter_by(host=host)
+                                 aggregate_id,
+                                 read_deleted='no').filter_by(host=host)
     if query.first():
         query.update({'deleted': True,
                       'deleted_at': utils.utcnow(),
