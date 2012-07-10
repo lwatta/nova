@@ -70,10 +70,16 @@ class API(base.Base):
                          'args': {'address': address}})
 
     def get_floating_ip(self, context, id):
-        return rpc.call(context,
-                        FLAGS.network_topic,
-                        {'method': 'get_floating_ip',
-                         'args': {'id': id}})
+        try:
+            return rpc.call(context,
+                            FLAGS.network_topic,
+                            {'method': 'get_floating_ip',
+                             'args': {'id': id}})
+        except rpc_common.RemoteError as ex:
+            if ex.exc_type == 'FloatingIpNotFound':
+                raise exception.FloatingIpNotFound()
+            else:
+                raise
 
     def get_floating_ip_pools(self, context):
         return rpc.call(context,
