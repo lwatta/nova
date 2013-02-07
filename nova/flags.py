@@ -419,6 +419,15 @@ global_opts = [
                 help='Whether to batch up the application of IPTables rules'
                      ' during a host restart and apply all at the end of the'
                      ' init phase'),
+    cfg.StrOpt('compute_driver',
+               default='nova.virt.connection.get_connection',
+               help='Driver to use for controlling virtualization. Options '
+                   'include: libvirt.LibvirtDriver, xenapi.XenAPIDriver, '
+                   'fake.FakeDriver, baremetal.BareMetalDriver, '
+                   'vmwareapi.VMWareESXDriver'),
+    cfg.StrOpt('control_exchange',
+               default='nova',
+               help='AMQP exchange to connect to if using RabbitMQ or Qpid'),
 ]
 
 FLAGS.register_opts(global_opts)
