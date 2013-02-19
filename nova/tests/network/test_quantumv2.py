@@ -909,6 +909,7 @@ class TestQuantumv2(test.TestCase):
         self.mox.ReplayAll()
         api.disassociate_floating_ip(self.context, self.instance, address)
 
+
 class TestQuantumv2ModuleMethods(test.TestCase):
     def test_ensure_requested_network_ordering_no_preference(self):
         l = [1, 2, 3]
