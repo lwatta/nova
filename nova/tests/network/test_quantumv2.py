@@ -650,8 +650,6 @@ class TestQuantumv2(test.TestCase):
         req_ids = [net['id'] for net in (self.nets3[0], self.nets3[-1])]
         self._get_available_networks(prv_nets, pub_nets, req_ids)
 
-<<<<<<< HEAD
-=======
     def test_get_floating_ip_pools(self):
         api = quantumapi.API()
         search_opts = {'router:external': True}
@@ -911,7 +909,6 @@ class TestQuantumv2(test.TestCase):
         self.mox.ReplayAll()
         api.disassociate_floating_ip(self.context, self.instance, address)
 
->>>>>>> tags/2012.2.3
 
 class TestQuantumv2ModuleMethods(test.TestCase):
     def test_ensure_requested_network_ordering_no_preference(self):
