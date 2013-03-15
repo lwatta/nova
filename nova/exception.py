@@ -1148,6 +1148,22 @@ class UnexpectedTaskStateError(NovaException):
     message = _("unexpected task state: expecting %(expected)s but "
                 "the actual state is %(actual)s")
 
+class PciDeviceClassUnsupported(Invalid):
+    message = _("Unsupported PCI device class: %(pci_class)s")
+
+
+class DuplicatePciDeviceAddress(Duplicate):
+    message = _("Duplicate PCI device address: %(pci_address)s")
+
+
+class PciDeviceAllocationFailed(NovaException):
+    message = _("PCI device allocation failed for instance %(name)s")
+
+
+class PciDeviceSetupError(NovaException):
+    message = _("Failed to set up PCI device: %(pci_address)s "
+                "error: %(error)s")
+
 
 class CryptoCAFileNotFound(FileNotFound):
     message = _("The CA file for %(project)s could not be found")

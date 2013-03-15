@@ -30,6 +30,7 @@ from nova.openstack.common import jsonutils
 from nova.openstack.common import log as logging
 from nova.openstack.common import timeutils
 from nova import utils
+import traceback
 
 resource_tracker_opts = [
     cfg.IntOpt('reserved_host_disk_mb', default=0,
@@ -372,7 +373,11 @@ class ResourceTracker(object):
         uuid = instance['uuid']
         if uuid in self.tracked_instances:
             self._update_usage_from_instance(self.compute_node, instance)
-            self._update(context.elevated(), self.compute_node)
+
+        # In case of pci pasthru, the devices are released after instances
+        # are destroyed from DB. Therefore, update that information even
+        # is it is removed from tracked_instances.
+        self._update(context.elevated(), self.compute_node)
 
     @property
     def disabled(self):
@@ -494,6 +499,15 @@ class ResourceTracker(object):
 
     def _update(self, context, values, prune_stats=False):
         """Persist the compute node updates to the DB"""
+        """ Since pci pass through right now does  not use resource allocator
+        to allocate the pci devices, rather uses its own module to allocate
+        it. Also, the consumed pci devices are put in instance metadata and
+        never updates the compute_node info. Therefore, some of the nova
+        client commands does not reflect the pci devices or its usage.
+        Until we can make resource allocator to allocate the pci devices,
+        this is a HACK to get the latest information to the compute_node
+        table in the database. -Shesha 03/13/2013 """
+        values['net_pci_passthru'] = self.driver.get_netpci_passthru_info()
         compute_node = db.compute_node_update(context,
                 self.compute_node['id'], values, prune_stats)
         self.compute_node = dict(compute_node)
@@ -533,6 +547,7 @@ class ResourceTracker(object):
 
         resources['current_workload'] = self.stats.calculate_workload()
         resources['stats'] = self.stats
+        resources['net_pci_passthru'] = self.driver.get_netpci_passthru_info()
 
     def _update_usage_from_instances(self, resources, instances):
         """Calculate resource usage based on instance utilization.  This is

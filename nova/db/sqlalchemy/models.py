@@ -161,6 +161,7 @@ class ComputeNode(BASE, NovaBase):
     # (See libvirt.virtConnection).
     cpu_info = Column(Text, nullable=True)
     disk_available_least = Column(Integer)
+    net_pci_passthru = Column(Text, nullable=True)
 
 
 class ComputeNodeStat(BASE, NovaBase):

@@ -916,6 +916,11 @@ class ComputeManager(manager.SchedulerDependentManager):
                                          task_state=None,
                                          terminated_at=timeutils.utcnow())
         self.db.instance_destroy(context, instance_uuid)
+
+        # pci pass thru devices are released after the instance is
+        # is destroyed. Therefore, re-issue update, to update the DB.
+        self.resource_tracker.update_usage(context, instance)
+
         system_meta = self.db.instance_system_metadata_get(context,
             instance_uuid)
 
