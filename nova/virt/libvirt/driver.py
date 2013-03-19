@@ -341,7 +341,7 @@ class LibvirtDriver(driver.ComputeDriver):
             LOG.error(_('Nova requires libvirt version '
                         '%(major)i.%(minor)i.%(micro)i or greater.') %
                         locals())
-	else:
+        else:
             self.host = host;
             self.pci_driver.init_host(host, libvirt_connection=self._conn)
 

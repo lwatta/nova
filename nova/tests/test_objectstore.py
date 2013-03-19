@@ -53,7 +53,7 @@ class S3APITestCase(test.TestCase):
         """Setup users, projects, and start a test server."""
         super(S3APITestCase, self).setUp()
         self.flags(buckets_path=os.path.join(OSS_TEMPDIR, 'buckets'),
-                   s3_host='127.0.0.1')
+                   s3_host='127.0.0.1', s3_port=3335)
 
         shutil.rmtree(FLAGS.buckets_path)
         os.mkdir(FLAGS.buckets_path)

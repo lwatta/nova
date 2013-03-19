@@ -2985,6 +2985,9 @@ class HostStateTestCase(test.TestCase):
                  '"mtrr", "sep", "apic"], '
                  '"topology": {"cores": "1", "threads": "1", "sockets": "1"}}')
     instance_caps = [("x86_64", "kvm", "hvm"), ("i686", "kvm", "hvm")]
+    net_pci_passthru = [{"network_id": "IN", "avail": 1, "total": 1,
+        "pci_class": "net"}, {"network_id": "OUT", "avail": 1, "total": 1,
+        "pci_class": "net"}]
 
     class FakeConnection(object):
         """Fake connection object"""
@@ -2997,6 +3000,9 @@ class HostStateTestCase(test.TestCase):
 
         def get_cpu_info(self):
             return HostStateTestCase.cpu_info
+
+        def get_netpci_passthru_info(self):
+            return jsonutils.dumps(HostStateTestCase.net_pci_passthru);
 
         def get_local_gb_total(self):
             return 100

@@ -60,6 +60,7 @@ class FakeDriver(driver.ComputeDriver):
           'host_other_config': {},
           'host_ip_address': '192.168.1.109',
           'host_cpu_info': {},
+          'host_net_pci_passthru': {},
           'disk_available': 500000000000,
           'disk_total': 600000000000,
           'disk_used': 100000000000,
@@ -87,6 +88,9 @@ class FakeDriver(driver.ComputeDriver):
         state = power_state.RUNNING
         fake_instance = FakeInstance(name, state)
         self.instances[name] = fake_instance
+
+    def get_netpci_passthru_info(self):
+        pass
 
     def snapshot(self, context, instance, name):
         if not instance['name'] in self.instances:
@@ -238,6 +242,7 @@ class FakeDriver(driver.ComputeDriver):
                'local_gb_used': 0,
                'hypervisor_type': 'fake',
                'hypervisor_version': '1.0',
+               'net_pci_passthru': '?',
                'cpu_info': '?'}
         return dic
 

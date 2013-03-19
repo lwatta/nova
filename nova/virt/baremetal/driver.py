@@ -622,6 +622,17 @@ class BareMetalDriver(driver.ComputeDriver):
         """
         return self.baremetal_nodes.get_hw_info('hypervisor_version')
 
+    def get_net_pci_passthru_info(self):
+        """Get net pci passthru information.
+
+        Obtains cpu feature from virConnect.getCapabilities,
+        and returns as a json string.
+
+        :return: see above description
+
+        """
+        return self.baremetal_nodes.get_hw_info('net_pci_passthru')
+
     def get_cpu_info(self):
         """Get cpuinfo information.
 
@@ -676,6 +687,7 @@ class BareMetalDriver(driver.ComputeDriver):
                'hypervisor_type': self.get_hypervisor_type(),
                'hypervisor_version': self.get_hypervisor_version(),
                'cpu_info': self.get_cpu_info(),
+               'net_pci_passthru': self.get_net_pci_passthru(),
                'cpu_arch': FLAGS.cpu_arch}
 
         LOG.info(_('#### RLK: cpu_arch = %s ') % FLAGS.cpu_arch)
@@ -732,6 +744,7 @@ class HostState(object):
         data["vcpus"] = self.connection.get_vcpu_total()
         data["vcpus_used"] = self.connection.get_vcpu_used()
         data["cpu_info"] = self.connection.get_cpu_info()
+        data["net_pci_passthru"] = self.connection.get_net_pci_passthru()
         data["cpu_arch"] = FLAGS.cpu_arch
         data["disk_total"] = self.connection.get_local_gb_total()
         data["disk_used"] = self.connection.get_local_gb_used()

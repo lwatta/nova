@@ -48,6 +48,7 @@ TEST_HYPERS = [
          current_workload=2,
          running_vms=2,
          cpu_info='cpu_info',
+         net_pci_passthru='net_pci_passthru',
          disk_available_least=100),
     dict(id=2,
          service_id=2,
@@ -72,6 +73,7 @@ TEST_HYPERS = [
          current_workload=2,
          running_vms=2,
          cpu_info='cpu_info',
+         net_pci_passthru='net_pci_passthru',
          disk_available_least=100)]
 TEST_SERVERS = [dict(name="inst1", uuid="uuid1", host="compute1"),
                 dict(name="inst2", uuid="uuid2", host="compute2"),
@@ -168,6 +170,7 @@ class HypervisorsTest(test.TestCase):
                 current_workload=2,
                 running_vms=2,
                 cpu_info='cpu_info',
+                net_pci_passthru='net_pci_passthru',
                 disk_available_least=100,
                 service=dict(id=1, host='compute1')))
 
@@ -213,6 +216,7 @@ class HypervisorsTest(test.TestCase):
                          current_workload=2,
                          running_vms=2,
                          cpu_info='cpu_info',
+                         net_pci_passthru='net_pci_passthru',
                          disk_available_least=100),
                     dict(id=2,
                          service=dict(id=2, host="compute2"),
@@ -230,6 +234,7 @@ class HypervisorsTest(test.TestCase):
                          current_workload=2,
                          running_vms=2,
                          cpu_info='cpu_info',
+                         net_pci_passthru='net_pci_passthru',
                          disk_available_least=100)]))
 
     def test_show_noid(self):
@@ -257,6 +262,7 @@ class HypervisorsTest(test.TestCase):
                     current_workload=2,
                     running_vms=2,
                     cpu_info='cpu_info',
+                    net_pci_passthru='net_pci_passthru',
                     disk_available_least=100)))
 
     def test_uptime_noid(self):
@@ -397,6 +403,7 @@ class HypervisorsSerializersTest(test.TestCase):
                      current_workload=2,
                      running_vms=2,
                      cpu_info="json data",
+                     net_pci_passthru="json data",
                      disk_available_least=100,
                      service=dict(id=1, host="compute1")),
                 dict(hypervisor_hostname="hyper2",
@@ -414,6 +421,7 @@ class HypervisorsSerializersTest(test.TestCase):
                      current_workload=2,
                      running_vms=2,
                      cpu_info="json data",
+                     net_pci_passthru="json data",
                      disk_available_least=100,
                      service=dict(id=2, host="compute2"))])
         text = serializer.serialize(exemplar)
@@ -443,6 +451,7 @@ class HypervisorsSerializersTest(test.TestCase):
                 current_workload=2,
                 running_vms=2,
                 cpu_info="json data",
+                net_pci_passthru="json data",
                 disk_available_least=100,
                 service=dict(id=1, host="compute1")))
         text = serializer.serialize(exemplar)
