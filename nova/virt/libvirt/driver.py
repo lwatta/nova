@@ -300,6 +300,7 @@ class LibvirtDriver(driver.ComputeDriver):
         self._disk_cachemode = None
         self.image_cache_manager = imagecache.ImageCacheManager()
         self.image_backend = imagebackend.Backend(FLAGS.use_cow_images)
+        self.host = None;
 
     @property
     def disk_cachemode(self):

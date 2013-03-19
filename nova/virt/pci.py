@@ -147,6 +147,7 @@ class PciDriver(object):
         self._pci_addr_split_re = re.compile(r"[:.]")
 
         self._context = context.get_admin_context()
+        self.host = None;
 
     def init_host(self, host, **kwargs):
         self.host = host
