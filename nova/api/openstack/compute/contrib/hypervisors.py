@@ -47,6 +47,7 @@ def make_hypervisor(elem, detail):
         elem.set('current_workload')
         elem.set('running_vms')
         elem.set('cpu_info')
+        elem.set('net_pci_passthru')
         elem.set('disk_available_least')
 
         service = xmlutil.SubTemplateElement(elem, 'service',
@@ -119,6 +120,7 @@ class HypervisorStatisticsTemplate(xmlutil.TemplateBuilder):
         root.set('free_disk_gb')
         root.set('current_workload')
         root.set('running_vms')
+        root.set('net_pci_passthru')
         root.set('disk_available_least')
 
         return xmlutil.MasterTemplate(root, 1)
@@ -142,7 +144,8 @@ class HypervisorsController(object):
                           'memory_mb_used', 'local_gb_used',
                           'hypervisor_type', 'hypervisor_version',
                           'free_ram_mb', 'free_disk_gb', 'current_workload',
-                          'running_vms', 'cpu_info', 'disk_available_least'):
+                          'running_vms', 'cpu_info', 'disk_available_least',
+                          'net_pci_passthru'):
                 hyp_dict[field] = hypervisor[field]
 
             hyp_dict['service'] = {
