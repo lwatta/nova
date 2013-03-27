@@ -1464,6 +1464,7 @@ class LibvirtDriver(driver.ComputeDriver):
             if admin_pass:
                 extra_md['admin_pass'] = admin_pass
 
+            extra_md['compute_node'] = instance.get('host')
             inst_md = instance_metadata.InstanceMetadata(instance,
                 content=files, extra_md=extra_md)
             cdb = configdrive.ConfigDriveBuilder(instance_md=inst_md)
