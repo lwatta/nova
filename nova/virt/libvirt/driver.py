@@ -271,6 +271,7 @@ class LibvirtDriver(driver.ComputeDriver):
         self._host_state = None
         self._initiator = None
         self._wrapped_conn = None
+        self._caps = None
         self.read_only = read_only
         self.firewall_driver = firewall.load_driver(
             default=DEFAULT_FIREWALL_DRIVER,
@@ -355,7 +356,7 @@ class LibvirtDriver(driver.ComputeDriver):
 
     def _test_connection(self):
         try:
-            self._wrapped_conn.getCapabilities()
+            self._wrapped_conn.getLibVersion()
             return True
         except libvirt.libvirtError as e:
             if (e.get_error_code() == libvirt.VIR_ERR_SYSTEM_ERROR and
@@ -912,6 +913,7 @@ class LibvirtDriver(driver.ComputeDriver):
         dom = self._lookup_by_name(instance["name"])
         (state, _max_mem, _mem, _cpus, _t) = dom.info()
         state = LIBVIRT_POWER_STATE[state]
+        old_domid = dom.ID()
         # NOTE(vish): This check allows us to reboot an instance that
         #             is already shutdown.
         if state == power_state.RUNNING:
@@ -920,8 +922,10 @@ class LibvirtDriver(driver.ComputeDriver):
         #             FLAG defines depending on how long the get_info
         #             call takes to return.
         for x in xrange(FLAGS.libvirt_wait_soft_reboot_seconds):
+            dom = self._lookup_by_name(instance["name"])
             (state, _max_mem, _mem, _cpus, _t) = dom.info()
             state = LIBVIRT_POWER_STATE[state]
+            new_domid = dom.ID()
 
             if state in [power_state.SHUTDOWN,
                          power_state.CRASHED]:
@@ -930,6 +934,10 @@ class LibvirtDriver(driver.ComputeDriver):
                 self._create_domain(domain=dom)
                 timer = utils.LoopingCall(self._wait_for_running, instance)
                 timer.start(interval=0.5).wait()
+                return True
+            elif old_domid != new_domid:
+                LOG.info(_("Instance may have been rebooted during soft "
+                           "reboot, so return now."), instance=instance)
                 return True
             greenthread.sleep(1)
         return False
@@ -1493,11 +1501,11 @@ class LibvirtDriver(driver.ComputeDriver):
     def get_host_capabilities(self):
         """Returns an instance of config.LibvirtConfigCaps representing
            the capabilities of the host"""
-        xmlstr = self._conn.getCapabilities()
-
-        caps = config.LibvirtConfigCaps()
-        caps.parse_str(xmlstr)
-        return caps
+        if not self._caps:
+            xmlstr = self._conn.getCapabilities()
+            self._caps = config.LibvirtConfigCaps()
+            self._caps.parse_str(xmlstr)
+        return self._caps
 
     def get_host_cpu_for_guest(self):
         """Returns an instance of config.LibvirtConfigGuestCPU
@@ -1791,6 +1799,7 @@ class LibvirtDriver(driver.ComputeDriver):
 
         if FLAGS.libvirt_type != "lxc" and FLAGS.libvirt_type != "uml":
             guest.acpi = True
+            guest.apic = True
 
         clk = config.LibvirtConfigGuestClock()
         clk.offset = "utc"

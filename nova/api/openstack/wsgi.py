@@ -27,6 +27,7 @@ import webob
 from nova import exception
 from nova.openstack.common import jsonutils
 from nova.openstack.common import log as logging
+from nova import utils
 from nova import wsgi
 
 
@@ -217,7 +218,7 @@ class XMLDeserializer(TextDeserializer):
         plurals = set(self.metadata.get('plurals', {}))
 
         try:
-            node = minidom.parseString(datastring).childNodes[0]
+            node = utils.safe_minidom_parse_string(datastring).childNodes[0]
             return {node.nodeName: self._from_xml_node(node, plurals)}
         except expat.ExpatError:
             msg = _("cannot understand XML")
@@ -268,11 +269,11 @@ class XMLDeserializer(TextDeserializer):
 
     def extract_text(self, node):
         """Get the text field contained by the given node"""
-        if len(node.childNodes) == 1:
-            child = node.childNodes[0]
+        ret_val = ""
+        for child in node.childNodes:
             if child.nodeType == child.TEXT_NODE:
-                return child.nodeValue
-        return ""
+                ret_val += child.nodeValue
+        return ret_val
 
     def extract_elements(self, node):
         """Get only Element type childs from node"""
@@ -631,7 +632,7 @@ def action_peek_json(body):
 def action_peek_xml(body):
     """Determine action to invoke."""
 
-    dom = minidom.parseString(body)
+    dom = utils.safe_minidom_parse_string(body)
     action_node = dom.childNodes[0]
 
     return action_node.tagName
@@ -653,11 +654,12 @@ class ResourceExceptionHandler(object):
             return True
 
         if isinstance(ex_value, exception.NotAuthorized):
-            msg = unicode(ex_value)
+            msg = unicode(ex_value.message % ex_value.kwargs)
             raise Fault(webob.exc.HTTPForbidden(explanation=msg))
         elif isinstance(ex_value, exception.Invalid):
+            msg = unicode(ex_value.message % ex_value.kwargs)
             raise Fault(exception.ConvertedException(
-                code=ex_value.code, explanation=unicode(ex_value)))
+                    code=ex_value.code, explanation=msg))
 
         # Under python 2.6, TypeError's exception value is actually a string,
         # so test # here via ex_type instead:
@@ -1166,6 +1168,10 @@ class Fault(webob.exc.HTTPException):
         # Replace the body with fault details.
         code = self.wrapped_exc.status_int
         fault_name = self._fault_names.get(code, "computeFault")
+        explanation = self.wrapped_exc.explanation
+        LOG.debug(_("Returning %(code)s to user: %(explanation)s"),
+                  {'code': code, 'explanation': explanation})
+
         fault_data = {
             fault_name: {
                 'code': code,

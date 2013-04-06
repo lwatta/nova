@@ -1273,6 +1273,27 @@ def fixed_ip_update(context, address, values):
         fixed_ip_ref.save(session=session)
 
 
+@require_context
+def fixed_ip_count_by_project(context, project_id, session=None):
+    authorize_project_context(context, project_id)
+
+    # NOTE(mikal): Yes I know this is horrible, but I couldn't
+    # get a query using a join working, mainly because of a failure
+    # to be able to express the where clause sensibly. Patches
+    # welcome.
+    session = get_session()
+    with session.begin():
+        instance_uuid_query = model_query(context, models.Instance.uuid,
+                                          read_deleted="no", session=session).\
+                                 filter(models.Instance.project_id == \
+                                            project_id)
+        uuid_filter = models.FixedIp.instance_uuid.in_(instance_uuid_query)
+        return model_query(context, models.FixedIp, read_deleted="no",
+                           session=session).\
+                           filter(uuid_filter).\
+                           count()
+
+
 ###################
 
 
@@ -2220,7 +2241,9 @@ def network_get_associated_fixed_ips(context, network_id, host=None):
                           models.VirtualInterface.address,
                           models.Instance.hostname,
                           models.Instance.updated_at,
-                          models.Instance.created_at).\
+                          models.Instance.created_at,
+                          models.FixedIp.allocated,
+                          models.FixedIp.leased).\
                           filter(models.FixedIp.deleted == False).\
                           filter(models.FixedIp.network_id == network_id).\
                           filter(models.FixedIp.allocated == True).\
@@ -2242,6 +2265,8 @@ def network_get_associated_fixed_ips(context, network_id, host=None):
         cleaned['instance_hostname'] = datum[5]
         cleaned['instance_updated'] = datum[6]
         cleaned['instance_created'] = datum[7]
+        cleaned['allocated'] = datum[8]
+        cleaned['leased'] = datum[9]
         data.append(cleaned)
     return data
 

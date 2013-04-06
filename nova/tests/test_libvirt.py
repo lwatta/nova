@@ -571,6 +571,7 @@ class LibvirtConnTestCase(test.TestCase):
                                     _fake_network_info(self.stubs, 1),
                                     None, None)
         self.assertEquals(cfg.acpi, True)
+        self.assertEquals(cfg.apic, True)
         self.assertEquals(cfg.memory, 1024 * 1024 * 2)
         self.assertEquals(cfg.vcpus, 1)
         self.assertEquals(cfg.os_type, vm_mode.HVM)
@@ -2328,11 +2329,11 @@ class LibvirtConnTestCase(test.TestCase):
             conn = libvirt_driver.LibvirtDriver(False)
 
             self.mox.StubOutWithMock(conn, "_wrapped_conn")
-            self.mox.StubOutWithMock(conn._wrapped_conn, "getCapabilities")
+            self.mox.StubOutWithMock(conn._wrapped_conn, "getLibVersion")
             self.mox.StubOutWithMock(libvirt.libvirtError, "get_error_code")
             self.mox.StubOutWithMock(libvirt.libvirtError, "get_error_domain")
 
-            conn._wrapped_conn.getCapabilities().AndRaise(
+            conn._wrapped_conn.getLibVersion().AndRaise(
                     libvirt.libvirtError("fake failure"))
 
             libvirt.libvirtError.get_error_code().AndReturn(error)
@@ -3330,8 +3331,10 @@ class IptablesFirewallTestCase(test.TestCase):
         ipv6 = self.fw.iptables.ipv6['filter'].rules
         ipv4_network_rules = len(ipv4) - len(inst_ipv4) - ipv4_len
         ipv6_network_rules = len(ipv6) - len(inst_ipv6) - ipv6_len
-        self.assertEquals(ipv4_network_rules,
-                  ipv4_rules_per_addr * ipv4_addr_per_network * networks_count)
+        # Extra rules are for the DHCP request
+        rules = (ipv4_rules_per_addr * ipv4_addr_per_network *
+                 networks_count) + 2
+        self.assertEquals(ipv4_network_rules, rules)
         self.assertEquals(ipv6_network_rules,
                   ipv6_rules_per_addr * ipv6_addr_per_network * networks_count)
 
@@ -3809,6 +3812,79 @@ disk size: 4.4M''', ''))
         self.mox.ReplayAll()
         libvirt_utils.fetch_image(context, target, image_id,
                                   user_id, project_id)
+
+    def test_fetch_raw_image(self):
+
+        def fake_execute(*cmd, **kwargs):
+            self.executes.append(cmd)
+            return None, None
+
+        def fake_rename(old, new):
+            self.executes.append(('mv', old, new))
+
+        def fake_unlink(path):
+            self.executes.append(('rm', path))
+
+        def fake_rm_on_errror(path):
+            self.executes.append(('rm', '-f', path))
+
+        def fake_qemu_img_info(path):
+            class FakeImgInfo(object):
+                def get(self, attr):
+                    return getattr(self, attr.replace(' ', '_'), None)
+                pass
+
+            file_format = path.split('.')[-1]
+            if file_format == 'part':
+                file_format = path.split('.')[-2]
+            elif file_format == 'converted':
+                file_format = 'raw'
+            if 'backing' in path:
+                backing_file = 'backing'
+            else:
+                backing_file = None
+
+            FakeImgInfo.file_format = file_format
+            FakeImgInfo.backing_file = backing_file
+
+            return FakeImgInfo()
+
+        self.stubs.Set(utils, 'execute', fake_execute)
+        self.stubs.Set(os, 'rename', fake_rename)
+        self.stubs.Set(os, 'unlink', fake_unlink)
+        self.stubs.Set(images, 'fetch', lambda *_: None)
+        self.stubs.Set(images, 'qemu_img_info', fake_qemu_img_info)
+        self.stubs.Set(utils, 'delete_if_exists', fake_rm_on_errror)
+
+        context = 'opaque context'
+        image_id = '4'
+        user_id = 'fake'
+        project_id = 'fake'
+
+        target = 't.qcow2'
+        self.executes = []
+        expected_commands = [('qemu-img', 'convert', '-O', 'raw',
+                              't.qcow2.part', 't.qcow2.converted'),
+                             ('rm', 't.qcow2.part'),
+                             ('mv', 't.qcow2.converted', 't.qcow2')]
+        images.fetch_to_raw(context, image_id, target, user_id, project_id)
+        self.assertEqual(self.executes, expected_commands)
+
+        target = 't.raw'
+        self.executes = []
+        expected_commands = [('mv', 't.raw.part', 't.raw')]
+        images.fetch_to_raw(context, image_id, target, user_id, project_id)
+        self.assertEqual(self.executes, expected_commands)
+
+        target = 'backing.qcow2'
+        self.executes = []
+        expected_commands = [('rm', '-f', 'backing.qcow2.part')]
+        self.assertRaises(exception.ImageUnacceptable,
+                          images.fetch_to_raw,
+                          context, image_id, target, user_id, project_id)
+        self.assertEqual(self.executes, expected_commands)
+
+        del self.executes
 
     def test_get_disk_backing_file(self):
         with_actual_path = False

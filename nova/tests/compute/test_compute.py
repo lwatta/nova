@@ -1372,6 +1372,24 @@ class ComputeTestCase(BaseTestCase):
         self.compute._delete_instance(self.context,
                 instance=jsonutils.to_primitive(instance))
 
+    def test_delete_instance_deletes_console_auth_tokens(self):
+        instance = self._create_fake_instance()
+        self.flags(vnc_enabled=True)
+
+        self.tokens_deleted = False
+
+        def fake_delete_tokens(*args, **kwargs):
+            self.tokens_deleted = True
+
+        cauth_rpcapi = self.compute.consoleauth_rpcapi
+        self.stubs.Set(cauth_rpcapi, 'delete_tokens_for_instance',
+                       fake_delete_tokens)
+
+        self.compute._delete_instance(self.context,
+                instance=jsonutils.to_primitive(instance))
+
+        self.assertTrue(self.tokens_deleted)
+
     def test_instance_termination_exception_sets_error(self):
         """Test that we handle InstanceTerminationFailure
         which is propagated up from the underlying driver.
@@ -2313,7 +2331,7 @@ class ComputeTestCase(BaseTestCase):
         instances = db.instance_get_all(ctxt)
         LOG.info(_("After force-killing instances: %s"), instances)
         self.assertEqual(len(instances), 1)
-        self.assertEqual(task_states.STOPPING, instances[0]['task_state'])
+        self.assertEqual(instances[0]['task_state'], None)
 
     def test_add_instance_fault(self):
         exc_info = None
@@ -3639,6 +3657,46 @@ class ComputeAPITestCase(BaseTestCase):
 
         db.instance_destroy(self.context, instance['uuid'])
 
+    def test_snapshot_image_service_fails(self):
+        # Ensure task_state remains at None if image service fails.
+        def fake_create(*args, **kwargs):
+            raise test.TestingException()
+
+        restore = getattr(fake_image._FakeImageService, 'create')
+        self.stubs.Set(fake_image._FakeImageService, 'create', fake_create)
+
+        instance = self._create_fake_instance()
+        self.assertRaises(test.TestingException,
+                          self.compute_api.snapshot,
+                          self.context,
+                          instance,
+                          'no_image_snapshot')
+
+        self.stubs.Set(fake_image._FakeImageService, 'create', restore)
+        db_instance = db.instance_get_all(context.get_admin_context())[0]
+        self.assertTrue(db_instance['task_state'] is None)
+
+    def test_backup_image_service_fails(self):
+        # Ensure task_state remains at None if image service fails.
+        def fake_create(*args, **kwargs):
+            raise test.TestingException()
+
+        restore = getattr(fake_image._FakeImageService, 'create')
+        self.stubs.Set(fake_image._FakeImageService, 'create', fake_create)
+
+        instance = self._create_fake_instance()
+        self.assertRaises(test.TestingException,
+                          self.compute_api.backup,
+                          self.context,
+                          instance,
+                          'no_image_backup',
+                          'DAILY',
+                          0)
+
+        self.stubs.Set(fake_image._FakeImageService, 'create', restore)
+        db_instance = db.instance_get_all(context.get_admin_context())[0]
+        self.assertTrue(db_instance['task_state'] is None)
+
     def test_backup(self):
         """Can't backup an instance which is already being backed up."""
         instance = self._create_fake_instance()
@@ -4465,7 +4523,9 @@ class ComputeAPITestCase(BaseTestCase):
                              'console_type': fake_console_type,
                              'host': 'fake_console_host',
                              'port': 'fake_console_port',
-                             'internal_access_path': 'fake_access_path'}
+                             'internal_access_path': 'fake_access_path',
+                             'instance_uuid': fake_instance["uuid"]}
+
         fake_connect_info2 = copy.deepcopy(fake_connect_info)
         fake_connect_info2['access_url'] = 'fake_console_url'
 
@@ -4498,6 +4558,36 @@ class ComputeAPITestCase(BaseTestCase):
                           self.context, instance, 'novnc')
 
         db.instance_destroy(self.context, instance['uuid'])
+
+    def test_validate_console_port(self):
+        self.flags(vnc_enabled=True)
+        instance = jsonutils.to_primitive(self._create_fake_instance())
+
+        def fake_driver_get_console(*args, **kwargs):
+            return {'host': "fake_host", 'port': "5900",
+                    'internal_access_path': None}
+        self.stubs.Set(self.compute.driver, "get_vnc_console",
+                       fake_driver_get_console)
+
+        self.assertTrue(self.compute.validate_console_port(self.context,
+                                                            instance,
+                                                            "5900",
+                                                            "novnc"))
+
+    def test_validate_console_port_wrong_port(self):
+        self.flags(vnc_enabled=True)
+        instance = jsonutils.to_primitive(self._create_fake_instance())
+
+        def fake_driver_get_console(*args, **kwargs):
+            return {'host': "fake_host", 'port': "5900",
+                    'internal_access_path': None}
+        self.stubs.Set(self.compute.driver, "get_vnc_console",
+                       fake_driver_get_console)
+
+        self.assertFalse(self.compute.validate_console_port(self.context,
+                                                            instance,
+                                                            "wrongport",
+                                                            "novnc"))
 
     def test_console_output(self):
         fake_instance = {'uuid': 'fake_uuid',

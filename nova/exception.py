@@ -157,6 +157,12 @@ class NovaException(Exception):
 
         super(NovaException, self).__init__(message)
 
+    def format_message(self):
+        if self.__class__.__name__.endswith('_Remote'):
+            return self.args[0]
+        else:
+            return unicode(self)
+
 
 class EC2APIError(NovaException):
     message = _("Unknown")
@@ -359,7 +365,7 @@ class ComputeResourcesUnavailable(ServiceUnavailable):
 
 
 class ComputeServiceUnavailable(ServiceUnavailable):
-    message = _("Compute service is unavailable at this time.")
+    message = _("Compute service of %(host)s is unavailable at this time.")
 
 
 class UnableToMigrateToSelf(Invalid):
@@ -387,6 +393,7 @@ class InvalidDevicePath(Invalid):
 
 class DevicePathInUse(Invalid):
     message = _("The supplied device path (%(path)s) is in use.")
+    code = 409
 
 
 class DeviceIsBusy(Invalid):
@@ -996,6 +1003,10 @@ class VolumeLimitExceeded(QuotaError):
 
 class FloatingIpLimitExceeded(QuotaError):
     message = _("Maximum number of floating ips exceeded")
+
+
+class FixedIpLimitExceeded(QuotaError):
+    message = _("Maximum number of fixed ips exceeded")
 
 
 class MetadataLimitExceeded(QuotaError):

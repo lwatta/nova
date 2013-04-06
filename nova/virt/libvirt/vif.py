@@ -64,24 +64,27 @@ class LibvirtBridgeDriver(vif.VIFDriver):
         if FLAGS.libvirt_use_virtio_for_bridges:
             conf.model = "virtio"
 
-        conf.filtername = "nova-instance-" + instance['name'] + "-" + mac_id
-        conf.add_filter_param("IP", mapping['ips'][0]['ip'])
-        if mapping['dhcp_server']:
-            conf.add_filter_param("DHCPSERVER", mapping['dhcp_server'])
+        if FLAGS.firewall_driver != "nova.virt.firewall.NoopFirewallDriver":
+            conf.filtername = "nova-instance-" + instance['name'] + "-" + \
+                              mac_id
+            if mapping['ips']:
+                conf.add_filter_param("IP", mapping['ips'][0]['ip'])
+            if mapping['dhcp_server']:
+                conf.add_filter_param("DHCPSERVER", mapping['dhcp_server'])
 
-        if FLAGS.use_ipv6:
-            conf.add_filter_param("RASERVER",
-                                  mapping.get('gateway_v6') + "/128")
-
-        if FLAGS.allow_same_net_traffic:
-            net, mask = netutils.get_net_and_mask(network['cidr'])
-            conf.add_filter_param("PROJNET", net)
-            conf.add_filter_param("PROJMASK", mask)
             if FLAGS.use_ipv6:
-                net_v6, prefixlen_v6 = netutils.get_net_and_prefixlen(
-                                           network['cidr_v6'])
-                conf.add_filter_param("PROJNET6", net_v6)
-                conf.add_filter_param("PROJMASK6", prefixlen_v6)
+                conf.add_filter_param("RASERVER",
+                                      mapping.get('gateway_v6') + "/128")
+
+            if FLAGS.allow_same_net_traffic:
+                net, mask = netutils.get_net_and_mask(network['cidr'])
+                conf.add_filter_param("PROJNET", net)
+                conf.add_filter_param("PROJMASK", mask)
+                if FLAGS.use_ipv6:
+                    net_v6, prefixlen_v6 = netutils.get_net_and_prefixlen(
+                                               network['cidr_v6'])
+                    conf.add_filter_param("PROJNET6", net_v6)
+                    conf.add_filter_param("PROJMASK6", prefixlen_v6)
 
         return conf
 
@@ -214,6 +217,8 @@ class LibvirtHybridOVSBridgeDriver(LibvirtBridgeDriver,
 
         if not linux_net._device_exists(br_name):
             utils.execute('brctl', 'addbr', br_name, run_as_root=True)
+            utils.execute('brctl', 'setfd', br_name, 0, run_as_root=True)
+            utils.execute('brctl', 'stp', br_name, 'off', run_as_root=True)
 
         if not linux_net._device_exists(v2_name):
             linux_net._create_veth_pair(v1_name, v2_name)

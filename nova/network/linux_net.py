@@ -30,6 +30,7 @@ from nova import flags
 from nova.openstack.common import cfg
 from nova.openstack.common import importutils
 from nova.openstack.common import log as logging
+from nova.openstack.common import timeutils
 from nova import utils
 
 
@@ -705,7 +706,11 @@ def get_dhcp_leases(context, network_ref):
     for data in db.network_get_associated_fixed_ips(context,
                                                     network_ref['id'],
                                                     host=host):
-        hosts.append(_host_lease(data))
+        # NOTE(cfb): Don't return a lease entry if the IP isn't
+        #            already leased
+        if data['allocated'] and data['leased']:
+            hosts.append(_host_lease(data))
+
     return '\n'.join(hosts)
 
 
@@ -865,9 +870,10 @@ def restart_dhcp(context, dev, network_ref):
            '--pid-file=%s' % _dhcp_file(dev, 'pid'),
            '--listen-address=%s' % network_ref['dhcp_server'],
            '--except-interface=lo',
-           '--dhcp-range=set:\'%s\',%s,static,%ss' %
+           '--dhcp-range=set:%s,%s,static,%s,%ss' %
                          (network_ref['label'],
                           network_ref['dhcp_start'],
+                          network_ref['netmask'],
                           FLAGS.dhcp_lease_time),
            '--dhcp-lease-max=%s' % len(netaddr.IPNetwork(network_ref['cidr'])),
            '--dhcp-hostsfile=%s' % _dhcp_file(dev, 'conf'),
@@ -928,13 +934,8 @@ interface %s
 
 def _host_lease(data):
     """Return a host string for an address in leasefile format."""
-    if data['instance_updated']:
-        timestamp = data['instance_updated']
-    else:
-        timestamp = data['instance_created']
-
+    timestamp = timeutils.utcnow()
     seconds_since_epoch = calendar.timegm(timestamp.utctimetuple())
-
     return '%d %s %s %s *' % (seconds_since_epoch + FLAGS.dhcp_lease_time,
                               data['vif_address'],
                               data['address'],

@@ -21,7 +21,6 @@ import socket
 
 import webob
 from webob import exc
-from xml.dom import minidom
 
 from nova.api.openstack import common
 from nova.api.openstack.compute import ips
@@ -297,7 +296,7 @@ class ActionDeserializer(CommonDeserializer):
     """
 
     def default(self, string):
-        dom = minidom.parseString(string)
+        dom = utils.safe_minidom_parse_string(string)
         action_node = dom.childNodes[0]
         action_name = action_node.tagName
 
@@ -404,7 +403,7 @@ class CreateDeserializer(CommonDeserializer):
 
     def default(self, string):
         """Deserialize an xml-formatted server create request."""
-        dom = minidom.parseString(string)
+        dom = utils.safe_minidom_parse_string(string)
         server = self._extract_server(dom)
         return {'body': {'server': server}}
 
@@ -869,18 +868,20 @@ class Controller(wsgi.Controller):
                             auto_disk_config=auto_disk_config,
                             scheduler_hints=scheduler_hints)
         except exception.QuotaError as error:
-            raise exc.HTTPRequestEntityTooLarge(explanation=unicode(error),
-                                                headers={'Retry-After': 0})
+            raise exc.HTTPRequestEntityTooLarge(
+                explanation=error.format_message(),
+                headers={'Retry-After': 0})
         except exception.InstanceTypeMemoryTooSmall as error:
-            raise exc.HTTPBadRequest(explanation=unicode(error))
+            raise exc.HTTPBadRequest(explanation=error.format_message())
         except exception.InstanceTypeNotFound as error:
-            raise exc.HTTPBadRequest(explanation=unicode(error))
+            raise exc.HTTPBadRequest(explanation=error.format_message())
         except exception.InstanceTypeDiskTooSmall as error:
-            raise exc.HTTPBadRequest(explanation=unicode(error))
+            raise exc.HTTPBadRequest(explanation=error.format_message())
         except exception.InvalidMetadata as error:
-            raise exc.HTTPBadRequest(explanation=unicode(error))
+            raise exc.HTTPBadRequest(explanation=error.format_message())
         except exception.InvalidMetadataSize as error:
-            raise exc.HTTPRequestEntityTooLarge(explanation=unicode(error))
+            raise exc.HTTPRequestEntityTooLarge(
+                explanation=error.format_message())
         except exception.ImageNotFound as error:
             msg = _("Can not find requested image")
             raise exc.HTTPBadRequest(explanation=msg)
@@ -891,7 +892,7 @@ class Controller(wsgi.Controller):
             msg = _("Invalid key_name provided.")
             raise exc.HTTPBadRequest(explanation=msg)
         except exception.SecurityGroupNotFound as error:
-            raise exc.HTTPBadRequest(explanation=unicode(error))
+            raise exc.HTTPBadRequest(explanation=error.format_message())
         except rpc_common.RemoteError as err:
             msg = "%(err_type)s: %(err_msg)s" % {'err_type': err.exc_type,
                                                  'err_msg': err.value}
@@ -1229,16 +1230,18 @@ class Controller(wsgi.Controller):
             msg = _("Instance could not be found")
             raise exc.HTTPNotFound(explanation=msg)
         except exception.InvalidMetadata as error:
-            raise exc.HTTPBadRequest(explanation=unicode(error))
+            raise exc.HTTPBadRequest(
+                explanation=error.format_message())
         except exception.InvalidMetadataSize as error:
-            raise exc.HTTPRequestEntityTooLarge(explanation=unicode(error))
+            raise exc.HTTPRequestEntityTooLarge(
+                explanation=error.format_message())
         except exception.ImageNotFound:
             msg = _("Cannot find image for rebuild")
             raise exc.HTTPBadRequest(explanation=msg)
         except exception.InstanceTypeMemoryTooSmall as error:
-            raise exc.HTTPBadRequest(explanation=unicode(error))
+            raise exc.HTTPBadRequest(explanation=error.format_message())
         except exception.InstanceTypeDiskTooSmall as error:
-            raise exc.HTTPBadRequest(explanation=unicode(error))
+            raise exc.HTTPBadRequest(explanation=error.format_message())
 
         instance = self._get_server(context, req, id)
 
