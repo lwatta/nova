@@ -60,8 +60,8 @@ The "net_vf" class requires the following class-specific parameters:
 """
 
 pci_device_opts = [
-    cfg.MultiStrOpt('pci_devices',
-                    default=[],
+    cfg.StrOpt('pci_devices',
+                    default=None,
                     help='List of PCI devices available for allocation'),
     cfg.BoolOpt('pci_dynamic_discovery',
                default=False,
@@ -154,20 +154,19 @@ class PciDriver(object):
 
         self.init_host_subclass(**kwargs)
 
-        if CONF.pci_devices:
-            LOG.debug(_('Loading available PCI devices from flags'))
-            # CONF.pci_devices is a python list of strings;
-            # each string represents a JSON object(key/value pairs)
-            for pci_dev_string in CONF.pci_devices:
-                try:
-                    # Raises ValueError/TypeError if there is a problem
-                    pci_dev_dict = json.loads(pci_dev_string)
-                except (TypeError, ValueError) as exc:
-                    raise exception.InvalidInput(
-                        reason=_("Failed parsing pci_devices flag: "\
-                                 "%(pci_dev_string)s\n%(exc)s") % locals())
+	if CONF.pci_devices:
+            try:
+                # Raises ValueError/TypeError if there is a problem
+	        conf_pci_devs = json.loads(CONF.pci_devices);
 
-                self._add_pci_device_to_inventory(pci_dev_dict)
+                LOG.info(_('Loading available PCI devices from flags'))
+                # CONF.pci_devices is a python list of strings in json format;
+                # each string represents a JSON object(key/value pairs)
+                for pci_dev_dict in conf_pci_devs:
+                    self._add_pci_device_to_inventory(pci_dev_dict)
+            except (TypeError, ValueError) as exc:
+	        LOG.exception('Failed parsing pci_devices flag: %s',
+	            CONF.pci_devices);
 
         if CONF.pci_dynamic_discovery:
             LOG.debug(_('Initiating PCI device dynamic discovery'))
