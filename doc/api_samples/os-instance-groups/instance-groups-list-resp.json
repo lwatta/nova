@@ -1,0 +1,11 @@
+{
+    "instance_groups": [
+        {
+            "id": "616fb98f-46ca-475e-917e-2563e5a8cd19",
+            "name": "test",
+            "policies": [{"name": "anti-affinity"}],
+            "members": [{"instance_id": "a00456d5-6f1b-44e6-8467-af28f0f6cd4f"}],
+            "metadata": {}
+        }
+    ]
+}

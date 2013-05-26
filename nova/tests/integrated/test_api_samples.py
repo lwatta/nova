@@ -3991,3 +3991,179 @@ class VolumesSampleJsonTest(ServersSampleBase):
 
 class VolumesSampleXmlTest(VolumesSampleJsonTest):
     ctype = 'xml'
+
+
+class InstanceGroupsSampleJsonTest(ServersSampleBase):
+    extension_name = "nova.api.openstack.compute.contrib" + \
+                     ".instance_groups.Instance_groups"
+
+    def _get_create_subs(self):
+        return {
+                'name': 'test'
+        }
+
+    def _post_instance_group(self):
+        """Verify the response status and returns the UUID of the
+        newly created instance group.
+        """
+        subs = self._get_create_subs()
+        response = self._do_post('os-instance-groups',
+                                 'instance-groups-post-req',
+                                 subs)
+        subs = self._get_regexes()
+        subs['name'] = 'test'
+        return self._verify_response('instance-groups-post-resp',
+                                     subs,
+                                     response,
+                                     200)
+
+    def _create_instance_group(self):
+        subs = self._get_create_subs()
+        return self._do_post('os-instance-groups',
+                             'instance-groups-post-req', subs)
+
+    def test_instance_groups_post(self):
+        return self._post_instance_group()
+
+    def test_instance_groups_list(self):
+        subs = self._get_create_subs()
+        uuid = self._post_instance_group()
+        response = self._do_get('os-instance-groups')
+        subs.update(self._get_regexes())
+        subs['id'] = uuid
+        self._verify_response('instance-groups-list-resp',
+                              subs,
+                              response,
+                              200)
+
+    def test_instance_groups_get(self):
+        # Get api sample of instance groups get request.
+        subs = {
+                'name': 'test',
+                }
+        uuid = self._post_instance_group()
+        subs['id'] = uuid
+        response = self._do_get('os-instance-groups/%s' % uuid)
+
+        self._verify_response('instance-groups-get-resp', subs, response, 200)
+
+    def test_instance_groups_update(self):
+        # Get api sample to update instance groups.
+        uuid = self._post_instance_group()
+        subs = {
+                'name': 'new_name'
+                }
+
+        response = self._do_put('os-instance-groups/%s' % uuid,
+                                'instance-groups-update-req',
+                                subs)
+        subs = {
+                'id': uuid,
+                }
+
+        self._verify_response('instance-groups-update-resp',
+                              subs,
+                              response,
+                              200)
+
+    def test_update_metadata(self):
+        uuid = self._post_instance_group()
+        response = self._do_post('os-instance-groups/%s/action' % uuid,
+                                 'instance-group-metadata-post-req',
+                                 {'action': 'set_metadata'})
+        subs = {
+                'id': uuid,
+                }
+
+        self._verify_response('instance-group-metadata-post-resp', subs,
+                              response, 200)
+        # Do another update
+        response = self._do_post('os-instance-groups/%s/action' % uuid,
+                                 'instance-group-metadata-update-req',
+                                 {'action': 'set_metadata'})
+        subs = {
+                'id': uuid,
+                }
+
+        self._verify_response('instance-group-metadata-update-resp', subs,
+                              response, 200)
+
+    def test_add_metadata(self):
+        uuid = self._post_instance_group()
+        response = self._do_post('os-instance-groups/%s/action' % uuid,
+                                 'instance-group-metadata-post-req',
+                                 {'action': 'set_metadata'})
+        subs = {
+                'id': uuid,
+                }
+
+        self._verify_response('instance-group-metadata-post-resp', subs,
+                              response, 200)
+
+    def test_remove_metadata(self):
+        uuid = self._post_instance_group()
+        response = self._do_post('os-instance-groups/%s/action' % uuid,
+                                 'instance-group-metadata-post-req',
+                                 {'action': 'set_metadata'})
+        # Do another update to remove an existing key and add a new key
+        response = self._do_post('os-instance-groups/%s/action' % uuid,
+                                 'instance-group-metadata-remove-req',
+                                 {'action': 'set_metadata'})
+        subs = {
+                'id': uuid,
+                }
+
+        self._verify_response('instance-group-metadata-remove-resp', subs,
+                              response, 200)
+
+    def test_add_policies(self):
+        uuid = self._post_instance_group()
+        response = self._do_post('os-instance-groups/%s/action' % uuid,
+                                 'instance-group-add-policies-post-req',
+                                 {'action': 'add_policies'})
+        subs = {
+                'id': uuid,
+                }
+
+        self._verify_response('instance-group-add-policies-post-resp', subs,
+                              response, 200)
+
+    def test_remove_policies(self):
+        uuid = self._post_instance_group()
+        response = self._do_post('os-instance-groups/%s/action' % uuid,
+                                 'instance-group-remove-policies-post-req',
+                                 {'action': 'remove_policies'})
+        subs = {
+                'id': uuid,
+                }
+
+        self._verify_response('instance-group-remove-policies-post-resp', subs,
+                              response, 200)
+
+    def test_add_members(self):
+        uuid = self._post_instance_group()
+        response = self._do_post('os-instance-groups/%s/action' % uuid,
+                                 'instance-group-add-members-post-req',
+                                 {'action': 'add_members'})
+        subs = {
+                'id': uuid,
+                }
+
+        self._verify_response('instance-group-add-members-post-resp', subs,
+                              response, 200)
+
+    def test_remove_members(self):
+        uuid = self._post_instance_group()
+        response = self._do_post('os-instance-groups/%s/action' % uuid,
+                                 'instance-group-remove-members-post-req',
+                                 {'action': 'remove_members'})
+        subs = {
+                'id': uuid,
+                }
+
+        self._verify_response('instance-group-remove-members-post-resp', subs,
+                              response, 200)
+
+
+class InstanceGroupsSampleXmlTest(InstanceGroupsSampleJsonTest):
+    ctype = 'xml'

@@ -559,6 +559,14 @@
             "name": "InstanceActions",
             "namespace": "http://docs.openstack.org/compute/ext/instance-actions/api/v1.1",
             "updated": "%(timestamp)s"
+        },
+        {
+            "alias": "os-instance-groups",
+            "description": "%(text)s",
+            "links": [],
+            "name": "InstanceGroups",
+            "namespace": "http://docs.openstack.org/compute/ext/instancegroups/api/v2.0",
+            "updated": "%(timestamp)s"
         }
     ]
 }

@@ -159,6 +159,7 @@ policy_data = """
     "compute_extension:v3:os-images": "",
     "compute_extension:instance_actions": "",
     "compute_extension:instance_actions:events": "is_admin:True",
+    "compute_extension:instance_groups": "",
     "compute_extension:instance_usage_audit_log": "",
     "compute_extension:keypairs": "",
     "compute_extension:v3:os-keypairs": "",
