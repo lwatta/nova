@@ -570,6 +570,100 @@ class LibvirtHybridOVSBridgeDriver(LibvirtGenericVIFDriver):
     def unplug(self, instance, vif):
         return self.unplug_ovs_hybrid(instance, vif)
 
+# Bob - Patch to handle trunk ports with csr1kv_ovs plugin.
+TRUNK_BR_PREFIX = 'tbr-'
+TRUNK_BR_NAME_LEN = 14
+# Name prefixes for veth device pair linking the integration bridge
+# with a device (i.e., VM) specific bridge for trunking.
+VETH_TR_BR_PREFIX = 'tr-'
+VETH_INT_BR_PREFIX = 'int-'
+
+
+class LibvirtTrunkHybridOVSBridgeDriver(LibvirtHybridOVSBridgeDriver):
+    """Like LibvirtHybridOVSBridgeDriver but extended to support
+    trunk ports.
+    """
+
+    def _get_trunk_bridge_name(self, port_id):
+        return (TRUNK_BR_PREFIX + port_id)[:TRUNK_BR_NAME_LEN]
+
+    def _get_trunk_side_veth_pair_name(self, bridge_name):
+        return VETH_TR_BR_PREFIX + bridge_name
+
+    def _get_br_int_side_veth_pair_name(self, bridge_name):
+        return VETH_INT_BR_PREFIX + bridge_name
+
+    def _create_ovs_bridge(self, bridge_name):
+        utils.execute('ovs-vsctl', '--', '--may-exist', 'add-br',
+                      bridge_name, run_as_root=True)
+
+    def _delete_ovs_bridge(self, bridge_name):
+        utils.execute('ovs-vsctl', '--', '--if-exists', 'del-br',
+                      bridge_name, run_as_root=True)
+
+    def plug(self, instance, vif):
+        """Plug using hybrid strategy and with network trunking support
+
+        Like LibvirtTrunkHybridOVSBridgeDriver.plug(...) but inserts an
+        per-VIF OVS (trunk) bridge between the per-VIF linux bridge and
+        the OVS integration bridge. Linking between the bridges is done
+        using veth devices. The resulting link/bridge topology is:
+
+        [VM]<-->[Linux bridge]<-->[trunk OVS bridge]<-->[br-int OVS bridge]
+                            veth-pair             veth-pair
+        """
+        network, mapping = vif
+        # backup name of integration bridge
+        br_name_bak = network.get('bridge')
+        # create trunk bridge
+        tr_br_name = self._get_trunk_bridge_name(mapping['vif_uuid'])
+        self._create_ovs_bridge(tr_br_name)
+        # make parent's plug(...) function attach veth from linux bridge
+        # to trunk bridge instead of integration bridge
+        network['bridge'] = tr_br_name
+        super(LibvirtTrunkHybridOVSBridgeDriver, self).plug(instance, vif)
+
+        v1_name = self._get_trunk_side_veth_pair_name(tr_br_name)
+        v2_name = self._get_br_int_side_veth_pair_name(tr_br_name)
+        if not linux_net.device_exists(v2_name):
+            iface_id = self.get_ovs_interfaceid(mapping)
+            linux_net._create_veth_pair(v1_name, v2_name)
+            # plug veth from trunk bridge into integration bridge
+            linux_net.create_ovs_vif_port(network['bridge'], v1_name, iface_id,
+                                          mapping['mac'], instance['uuid'])
+            # ensure we use correct name of integration bridge
+            if br_name_bak is None:
+                network.pop('bridge')
+            else:
+                network['bridge'] = br_name_bak
+            linux_net.create_ovs_vif_port(self.get_bridge_name(network),
+                                          v2_name, iface_id, mapping['mac'],
+                                          instance['uuid'])
+
+    def unplug(self, instance, vif):
+        """UnPlug using hybrid strategy and with network trunking support
+
+        Unhook port from OVS, delete trunk bridge and delete both veth
+        devices. Then call parents unplug(...) to let it finish the cleanup.
+        """
+
+        try:
+            network, mapping = vif
+            tr_br_name = self._get_trunk_bridge_name(mapping['vif_uuid'])
+            v1_name = self._get_trunk_side_veth_pair_name(tr_br_name)
+            v2_name = self._get_br_int_side_veth_pair_name(tr_br_name)
+            # unplug and delete veth devices
+            linux_net.delete_ovs_vif_port(self.get_bridge_name(network),
+                                          v2_name)
+            self._delete_ovs_bridge(tr_br_name)
+        except processutils.ProcessExecutionError:
+            LOG.exception(_("Failed while unplugging vif"), instance=instance)
+
+        return super(LibvirtTrunkHybridOVSBridgeDriver, self).unplug(instance,
+                                                                     vif)
+
+# Bob - End of patch
+
 
 class LibvirtOpenVswitchVirtualPortDriver(LibvirtGenericVIFDriver):
     """Retained in Grizzly for compatibility with Quantum
