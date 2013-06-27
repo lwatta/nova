@@ -575,23 +575,27 @@ TRUNK_BR_PREFIX = 'tbr'
 TRUNK_BR_NAME_LEN = 14
 # Name prefixes for veth device pair linking the integration bridge
 # with a device (i.e., VM) specific bridge for trunking.
-VETH_TR_BR_PREFIX = 'tbs'
-VETH_INT_BR_PREFIX = 'ibs'
+VETH_TR_BR_PREFIX = 'tbs_'
+VETH_INT_BR_PREFIX = 'ibs_'
+VETH_LEN = network_model.NIC_NAME_LEN - 1
 
 
 class LibvirtTrunkHybridOVSBridgeDriver(LibvirtHybridOVSBridgeDriver):
     """Like LibvirtHybridOVSBridgeDriver but extended to support
     trunk ports.
     """
+    def get_br_name(self, iface_id):
+        iid = iface_id[1:] if iface_id[0] == '_' else iface_id
+        return ("qbr" + iid)[:network_model.NIC_NAME_LEN]
 
     def _get_trunk_bridge_name(self, port_id):
         return (TRUNK_BR_PREFIX + port_id)[:TRUNK_BR_NAME_LEN]
 
     def _get_trunk_side_veth_pair_name(self, bridge_name):
-        return VETH_TR_BR_PREFIX + bridge_name[3:]
+        return VETH_TR_BR_PREFIX + bridge_name[3:VETH_LEN]
 
     def _get_br_int_side_veth_pair_name(self, bridge_name):
-        return VETH_INT_BR_PREFIX + bridge_name[3:]
+        return VETH_INT_BR_PREFIX + bridge_name[3:VETH_LEN]
 
     def _create_ovs_bridge(self, bridge_name):
         utils.execute('ovs-vsctl', '--', '--may-exist', 'add-br',
