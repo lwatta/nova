@@ -220,17 +220,9 @@ class API(base.Base):
         touched_port_ids = []
         created_port_ids = []
         for network in nets:
-            # If security groups are requested on an instance then the
-            # network must has a subnet associated with it. Some plugins
-            # implement the port-security extension which requires
-            # 'port_security_enabled' to be True for security groups.
-            # That is why True is returned if 'port_security_enabled'
-            # is not found.
-            if (security_groups and not (
-                    network['subnets']
-                    and network.get('port_security_enabled', True))):
-
-                raise exception.SecurityGroupCannotBeApplied()
+            # No check for security groups here since we allow
+            # an instance to use Neutron ports that do not have
+            # any security groups.
             network_id = network['id']
             zone = 'compute:%s' % instance['availability_zone']
             port_req_body = {'port': {'device_id': instance['uuid'],
@@ -241,6 +233,17 @@ class API(base.Base):
                     quantum.update_port(port['id'], port_req_body)
                     touched_port_ids.append(port['id'])
                 else:
+                    # If security groups are requested on an instance then the
+                    # network must has a subnet associated with it. Some plugins
+                    # implement the port-security extension which requires
+                    # 'port_security_enabled' to be True for security groups.
+                    # That is why True is returned if 'port_security_enabled'
+                    # is not found.
+                    if (security_groups and not (
+                            network['subnets']
+                            and network.get('port_security_enabled', True))):
+
+                        raise exception.SecurityGroupCannotBeApplied()
                     fixed_ip = fixed_ips.get(network_id)
                     if fixed_ip:
                         port_req_body['port']['fixed_ips'] = [{'ip_address':
