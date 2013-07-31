@@ -1151,6 +1151,22 @@ class InstanceUserDataTooLarge(NovaException):
                 "%(maxsize)s bytes once base64 encoded. Your data is "
                 "%(length)d bytes")
 
+class PciDeviceClassUnsupported(Invalid):
+    message = _("Unsupported PCI device class: %(pci_class)s")
+
+
+class DuplicatePciDeviceAddress(Duplicate):
+    message = _("Duplicate PCI device address: %(pci_address)s")
+
+
+class PciDeviceAllocationFailed(NovaException):
+    message = _("PCI device allocation failed for instance %(name)s")
+
+
+class PciDeviceSetupError(NovaException):
+    message = _("Failed to set up PCI device: %(pci_address)s "
+                "error: %(error)s")
+
 
 class InstanceUserDataMalformed(NovaException):
     message = _("User data needs to be valid base 64.")

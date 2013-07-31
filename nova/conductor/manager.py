@@ -431,3 +431,9 @@ class ConductorManager(manager.Manager):
 
     def compute_unrescue(self, context, instance):
         self.compute_api.unrescue(context, instance)
+
+    def instance_type_extra_specs_get(self, context, flavorid):
+        return self.db.instance_type_extra_specs_get(context, flavorid)
+
+    def instance_metadata_update(self, context, instance_uuid, metadata, delete):
+        return self.db.instance_metadata_update(context, instance_uuid, metadata, delete);

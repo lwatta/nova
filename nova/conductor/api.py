@@ -347,6 +347,11 @@ class LocalAPI(object):
     def compute_unrescue(self, context, instance):
         return self._manager.compute_unrescue(context, instance)
 
+    def instance_type_extra_specs_get(self, context, flavorid):
+        return self._manager.instance_type_extra_specs_get(context, flavorid)
+
+    def instance_metadata_update(self, context, instance_uuid, metadata, delete):
+        return self._manager.instance_metadata_update(context, instance_uuid, metadata, delete)
 
 class API(object):
     """Conductor API that does updates via RPC to the ConductorManager."""
@@ -689,3 +694,9 @@ class API(object):
 
     def compute_unrescue(self, context, instance):
         return self.conductor_rpcapi.compute_unrescue(context, instance)
+
+    def instance_type_extra_specs_get(self, context, flavorid):
+        return self.conductor_rpcapi.instance_type_extra_specs_get(context, flavorid)
+
+    def instance_metadata_update(self, context, instance_uuid, metadata, delete):
+        return self.conductor_rpcapi.instance_metadata_update(context, instance_uuid, metadata, delete)

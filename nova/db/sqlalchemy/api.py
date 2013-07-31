@@ -26,6 +26,7 @@ import functools
 import sys
 import time
 import uuid
+import json
 
 from oslo.config import cfg
 from sqlalchemy import and_
@@ -579,13 +580,42 @@ def compute_node_statistics(context):
                          func.sum(models.ComputeNode.current_workload),
                          func.sum(models.ComputeNode.running_vms),
                          func.sum(models.ComputeNode.disk_available_least),
+                         func.group_concat(models.ComputeNode.net_pci_passthru), # idx 12
                          base_model=models.ComputeNode,
                          read_deleted="no").first()
+
+    result = list(result); # Need this for updating
+    hosts_dev_list = []
+    net_pci_column_val = result.pop(12)
+
+    if net_pci_column_val:
+        try:
+            hosts_dev_list = json.loads('[' + net_pci_column_val + ']')
+        except:
+            LOG.error('Invlid JSON string stored in the DB')
+            raise;
+
+
+    networks = dict();
+    total = avail = 0;
+
+    for hdevs in hosts_dev_list:
+        for pcidev in hdevs:
+            total += pcidev['total']
+            avail += pcidev['avail'];
+            if not networks.has_key(pcidev['network_id']):
+                networks[pcidev['network_id']] = 1;
+
+    result.append(len(networks))    # pci_networks
+    result.append(total)            # net_pci_devs
+    result.append(total - avail);   # net_pci_devs_used
 
     # Build a dict of the info--making no assumptions about result
     fields = ('count', 'vcpus', 'memory_mb', 'local_gb', 'vcpus_used',
               'memory_mb_used', 'local_gb_used', 'free_ram_mb', 'free_disk_gb',
-              'current_workload', 'running_vms', 'disk_available_least')
+              'current_workload', 'running_vms', 'disk_available_least',
+              'pci_networks', 'net_pci_devs', 'net_pci_devs_used')
+
     return dict((field, int(result[idx] or 0))
                 for idx, field in enumerate(fields))
 

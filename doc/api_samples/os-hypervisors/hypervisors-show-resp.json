@@ -19,6 +19,7 @@
             "id": 2
         },
         "vcpus": 1,
-        "vcpus_used": 0
+        "vcpus_used": 0,
+        "net_pci_passthru":""
     }
 }

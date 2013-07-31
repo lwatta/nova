@@ -455,3 +455,14 @@ class ConductorAPI(nova.openstack.common.rpc.proxy.RpcProxy):
         instance_p = jsonutils.to_primitive(instance)
         msg = self.make_msg('compute_unrescue', instance=instance_p)
         return self.call(context, msg, version='1.48')
+
+    def instance_type_extra_specs_get(self, context, flavorid):
+        msg = self.make_msg('instance_type_extra_specs_get', flavorid=flavorid)
+        return self.call(context, msg, version='1.48')
+
+
+    def instance_metadata_update(self, context, instance_uuid, metadata, delete):
+        metadata_p = jsonutils.to_primitive(metadata)
+        msg = self.make_msg('instance_metadata_update', instance_uuid=instance_uuid,
+            metadata=metadata_p, delete=delete)
+        return self.call(context, msg, version='1.48');

@@ -201,6 +201,9 @@ class ComputeDriver(object):
         """
         raise NotImplementedError()
 
+    def get_netpci_passthru_info(self):
+        pass;
+
     def spawn(self, context, instance, image_meta, injected_files,
               admin_password, network_info=None, block_device_info=None):
         """

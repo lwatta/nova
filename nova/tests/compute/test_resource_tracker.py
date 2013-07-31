@@ -84,6 +84,7 @@ class FakeVirtDriver(driver.ComputeDriver):
             'hypervisor_version': 0,
             'hypervisor_hostname': 'fakehost',
             'cpu_info': '',
+            'net_pci_passthru': '',
         }
         return d
 
@@ -134,6 +135,7 @@ class BaseTestCase(test.TestCase):
             "current_workload": 1,
             "running_vms": 0,
             "cpu_info": None,
+            "net_pci_passthru": None,
             "stats": [{"key": "num_instances", "value": "1"}],
            "hypervisor_hostname": "fakenode",
         }

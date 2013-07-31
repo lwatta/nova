@@ -154,6 +154,9 @@ libvirt_opts = [
     cfg.StrOpt('libvirt_vif_driver',
                default='nova.virt.libvirt.vif.LibvirtGenericVIFDriver',
                help='The libvirt VIF driver to configure the VIFs.'),
+    cfg.StrOpt('libvirt_pci_driver',
+               default='nova.virt.libvirt.pci.LibvirtPciDriver',
+               help='The libvirt PCI driver to manage PCI devices.'),
     cfg.ListOpt('libvirt_volume_drivers',
                 default=[
                   'iscsi=nova.virt.libvirt.volume.LibvirtISCSIVolumeDriver',
@@ -311,11 +314,14 @@ class LibvirtDriver(driver.ComputeDriver):
 
         vif_class = importutils.import_class(CONF.libvirt_vif_driver)
         self.vif_driver = vif_class(self._get_connection)
+        pci_class = importutils.import_class(CONF.libvirt_pci_driver)
+        self.pci_driver = pci_class()
 
         self.volume_drivers = driver.driver_dict_from_config(
             CONF.libvirt_volume_drivers, self)
 
         self._host_state = None
+        self.host = None
         self._event_queue = None
 
         self._disk_cachemode = None
@@ -545,6 +551,9 @@ class LibvirtDriver(driver.ComputeDriver):
             LOG.error(_('Nova requires libvirt version '
                         '%(major)i.%(minor)i.%(micro)i or greater.') %
                         locals())
+        else:
+            self.host = host;
+            self.pci_driver.init_host(host, libvirt_connection=self._conn)
 
         self._init_events()
 
@@ -683,12 +692,28 @@ class LibvirtDriver(driver.ComputeDriver):
     def plug_vifs(self, instance, network_info):
         """Plug VIFs into networks."""
         for (network, mapping) in network_info:
-            self.vif_driver.plug(instance, (network, mapping))
+            pci_device_instead_of_vif = \
+                self.pci_driver.has_network_pci_devices(instance,
+                                                        network,
+                                                        mapping,
+                                                        True  # Plugging
+                                                        )
+
+            if not pci_device_instead_of_vif:
+                self.vif_driver.plug(instance, (network, mapping))
 
     def unplug_vifs(self, instance, network_info):
         """Unplug VIFs from networks."""
         for (network, mapping) in network_info:
-            self.vif_driver.unplug(instance, (network, mapping))
+            pci_device_instead_of_vif = \
+                self.pci_driver.has_network_pci_devices(instance,
+                                                        network,
+                                                        mapping,
+                                                        False  # Unplugging
+                                                        )
+
+            if not pci_device_instead_of_vif:
+                self.vif_driver.unplug(instance, (network, mapping))
 
     def _destroy(self, instance):
         try:
@@ -1043,7 +1068,17 @@ class LibvirtDriver(driver.ComputeDriver):
     def attach_interface(self, instance, image_meta, network_info):
         virt_dom = self._lookup_by_name(instance['name'])
         for (network, mapping) in network_info:
-            self.vif_driver.plug(instance, (network, mapping))
+            pci_device_instead_of_vif = \
+                self.pci_driver.has_network_pci_devices(instance,
+                                                        network,
+                                                        mapping,
+                                                        True  # Plugging
+                                                        )
+
+
+            if not pci_device_instead_of_vif:
+                self.vif_driver.plug(instance, (network, mapping))
+
             self.firewall_driver.setup_basic_filtering(instance,
                                                        [(network, mapping)])
             cfg = self.vif_driver.get_config(instance, network, mapping,
@@ -1509,6 +1544,14 @@ class LibvirtDriver(driver.ComputeDriver):
     # for xenapi(tr3buchet)
     def spawn(self, context, instance, image_meta, injected_files,
               admin_password, network_info=None, block_device_info=None):
+        try:
+            self.pci_driver.allocate_pci_devices(instance)
+        except exception.PciDeviceAllocationFailed as exc:
+            name = instance['name']
+            LOG.error(_("PCI device allocation failed for instance "\
+                        "%(name)s: %(exc)s") % locals())
+            raise exc
+
         disk_info = blockinfo.get_disk_info(CONF.libvirt_type,
                                             instance,
                                             block_device_info,
@@ -1861,6 +1904,7 @@ class LibvirtDriver(driver.ComputeDriver):
             if admin_pass:
                 extra_md['admin_pass'] = admin_pass
 
+            extra_md['compute_node'] = instance.get('host')
             inst_md = instance_metadata.InstanceMetadata(instance,
                 content=files, extra_md=extra_md)
             with configdrive.ConfigDriveBuilder(instance_md=inst_md) as cdb:
@@ -2143,6 +2187,7 @@ class LibvirtDriver(driver.ComputeDriver):
         guest.uuid = instance['uuid']
         guest.memory = inst_type['memory_mb'] * 1024
         guest.vcpus = inst_type['vcpus']
+        guest.pci_devices = self.pci_driver.get_allocated_pci_devices(instance)
 
         quota_items = ['cpu_shares', 'cpu_period', 'cpu_quota']
         for key, value in inst_type['extra_specs'].iteritems():
@@ -2441,6 +2486,7 @@ class LibvirtDriver(driver.ComputeDriver):
         self.plug_vifs(instance, network_info)
         self.firewall_driver.setup_basic_filtering(instance, network_info)
         self.firewall_driver.prepare_instance_filter(instance, network_info)
+        self.pci_driver.prepare_pci_devices_for_instance(instance)
         domain = self._create_domain(xml, instance=instance)
 
         self.firewall_driver.apply_instance_filter(instance, network_info)
@@ -2746,6 +2792,11 @@ class LibvirtDriver(driver.ComputeDriver):
                                           flush_operations=flush_ops))
         return vol_usage
 
+    def get_netpci_passthru_info(self):
+        netdev_list = \
+            self.pci_driver.get_all_free_net_pci_devices(['net', 'net_vf']);
+        return jsonutils.dumps(netdev_list);
+
     def block_stats(self, instance_name, disk):
         """
         Note that this function takes an instance name.
@@ -2826,6 +2877,7 @@ class LibvirtDriver(driver.ComputeDriver):
                'hypervisor_version': self.get_hypervisor_version(),
                'hypervisor_hostname': self.get_hypervisor_hostname(),
                'cpu_info': self.get_cpu_info(),
+               'net_pci_passthru': self.get_netpci_passthru_info(),
                'disk_available_least': _get_disk_available_least()}
         return dic
 
@@ -3718,6 +3770,8 @@ class HostState(object):
         data["hypervisor_hostname"] = self.driver.get_hypervisor_hostname()
         data["supported_instances"] = \
             self.driver.get_instance_capabilities()
+        data['net_pci_passthru'] = \
+            jsonutils.loads(self.driver.get_netpci_passthru_info());
 
         self._stats = data
 

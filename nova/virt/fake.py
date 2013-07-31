@@ -27,6 +27,7 @@ semantics of real hypervisor connections.
 
 from oslo.config import cfg
 
+from nova.openstack.common import jsonutils
 from nova.compute import power_state
 from nova.compute import task_states
 from nova import db
@@ -98,6 +99,7 @@ class FakeDriver(driver.ComputeDriver):
           'host_other_config': {},
           'host_ip_address': '192.168.1.109',
           'host_cpu_info': {},
+          'host_net_pci_passthru': {},
           'disk_available': 500000000000,
           'disk_total': 600000000000,
           'disk_used': 100000000000,
@@ -130,6 +132,11 @@ class FakeDriver(driver.ComputeDriver):
         state = power_state.RUNNING
         fake_instance = FakeInstance(name, state)
         self.instances[name] = fake_instance
+
+    def get_netpci_passthru_info(self):
+        netdev_list = [{'network_id': 'IN', 'avail': 0, 'total': 1,'pci_class': 'net'},
+        {'network_id': 'OUT', 'avail': 1, 'total': 1,'pci_class': 'net'}]
+        return jsonutils.dumps(netdev_list);
 
     def snapshot(self, context, instance, name, update_task_state):
         if instance['name'] not in self.instances:
@@ -338,6 +345,7 @@ class FakeDriver(driver.ComputeDriver):
                'hypervisor_type': 'fake',
                'hypervisor_version': '1.0',
                'hypervisor_hostname': nodename,
+               'net_pci_passthru':"",
                'cpu_info': '?'}
         return dic
 

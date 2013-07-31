@@ -48,6 +48,10 @@ TEST_HYPERS = [
          current_workload=2,
          running_vms=2,
          cpu_info='cpu_info',
+         net_pci_passthru='',
+         pci_networks=0,
+         net_pci_devs=0,
+         net_pci_devs_used=0,
          disk_available_least=100),
     dict(id=2,
          service_id=2,
@@ -72,6 +76,10 @@ TEST_HYPERS = [
          current_workload=2,
          running_vms=2,
          cpu_info='cpu_info',
+         net_pci_passthru='',
+         pci_networks=0,
+         net_pci_devs=0,
+         net_pci_devs_used=0,
          disk_available_least=100)]
 TEST_SERVERS = [dict(name="inst1", uuid="uuid1", host="compute1"),
                 dict(name="inst2", uuid="uuid2", host="compute2"),
@@ -107,6 +115,9 @@ def fake_compute_node_statistics(context):
         free_disk_gb=0,
         current_workload=0,
         running_vms=0,
+        pci_networks=0,
+        net_pci_devs=0,
+        net_pci_devs_used=0,
         disk_available_least=0,
         )
 
@@ -168,6 +179,7 @@ class HypervisorsTest(test.TestCase):
                 current_workload=2,
                 running_vms=2,
                 cpu_info='cpu_info',
+                net_pci_passthru='',
                 disk_available_least=100,
                 service=dict(id=1, host='compute1')))
 
@@ -213,6 +225,7 @@ class HypervisorsTest(test.TestCase):
                          current_workload=2,
                          running_vms=2,
                          cpu_info='cpu_info',
+                         net_pci_passthru='',
                          disk_available_least=100),
                     dict(id=2,
                          service=dict(id=2, host="compute2"),
@@ -230,6 +243,7 @@ class HypervisorsTest(test.TestCase):
                          current_workload=2,
                          running_vms=2,
                          cpu_info='cpu_info',
+                         net_pci_passthru='',
                          disk_available_least=100)]))
 
     def test_show_noid(self):
@@ -257,6 +271,7 @@ class HypervisorsTest(test.TestCase):
                     current_workload=2,
                     running_vms=2,
                     cpu_info='cpu_info',
+                    net_pci_passthru='',
                     disk_available_least=100)))
 
     def test_uptime_noid(self):
@@ -329,6 +344,9 @@ class HypervisorsTest(test.TestCase):
                     free_disk_gb=250,
                     current_workload=4,
                     running_vms=4,
+                    pci_networks=0,
+                    net_pci_devs=0,
+                    net_pci_devs_used=0,
                     disk_available_least=200)))
 
 
@@ -503,6 +521,9 @@ class HypervisorsSerializersTest(test.TestCase):
                 free_disk_gb=250,
                 current_workload=4,
                 running_vms=4,
+                pci_networks=0,
+                net_pci_devs=0,
+                net_pci_devs_used=0,
                 disk_available_least=200))
         text = serializer.serialize(exemplar)
         tree = etree.fromstring(text)

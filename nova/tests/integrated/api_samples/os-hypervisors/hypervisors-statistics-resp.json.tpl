@@ -11,6 +11,9 @@
         "memory_mb_used": 512,
         "running_vms": 0,
         "vcpus": 1,
-        "vcpus_used": 0
+        "vcpus_used": 0,
+        "pci_networks": 0,
+        "net_pci_devs_used": 0,
+        "net_pci_devs": 0
     }
 }

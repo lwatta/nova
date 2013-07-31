@@ -164,6 +164,9 @@ class BareMetalDriver(driver.ComputeDriver):
         # TODO(deva): define the version properly elsewhere
         return 1
 
+    def get_net_pci_passthru(self):
+        return 'net_pci_passthru'
+
     def legacy_nwinfo(self):
         return True
 
@@ -401,6 +404,7 @@ class BareMetalDriver(driver.ComputeDriver):
                'hypervisor_type': self.get_hypervisor_type(),
                'hypervisor_version': self.get_hypervisor_version(),
                'hypervisor_hostname': str(node['uuid']),
+               'net_pci_passthru': self.get_net_pci_passthru(),
                'cpu_info': 'baremetal cpu',
                }
         return dic
@@ -439,6 +443,7 @@ class BareMetalDriver(driver.ComputeDriver):
             data['vcpus'] = res['vcpus']
             data['vcpus_used'] = res['vcpus_used']
             data['cpu_info'] = res['cpu_info']
+            data['net_pci_passthru'] = res['net_pci_passthru']
             data['disk_total'] = res['local_gb']
             data['disk_used'] = res['local_gb_used']
             data['disk_available'] = res['local_gb'] - res['local_gb_used']
