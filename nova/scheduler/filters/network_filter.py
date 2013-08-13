@@ -38,13 +38,14 @@ class NetworkFilter(filters.BaseHostFilter):
         capabilities. """
     def __init__(self):
         self.passthru_networks = CONF.pci_passthru_networks;
-        if not isinstance(self.passthru_networks, (list, tuple)):
+        if not self.passthru_networks: # If it is not specified in the conf file
+	    self.passthru_networks = list(); # Empty list
+        elif not isinstance(self.passthru_networks, (list, tuple)):
             self.passthru_networks = \
                 [string.strip(s) for s in self.passthru_networks.split(',')]
 
     def host_passes(self, host_state, filter_properties):
         LOG.debug('##### NetworkHostsFilter for %s #####' % host_state.host);
-        LOG.error('##### NetworkHostsFilter for %s #####' % host_state.host);
 #        LOG.debug('##### NetworkHostsFilter for %s #####' % filter_properties);
 
         context = filter_properties['context']
@@ -53,12 +54,10 @@ class NetworkFilter(filters.BaseHostFilter):
             LOG.debug(_('ALL Passthru networks: %s') % n)
 
         extra_specs = filter_properties['instance_type']['extra_specs']
-        LOG.error('HERE 1');
         if len(extra_specs) == 0: # No PCI passthru requested for this instance
             LOG.debug('No PCI passthru requested for this instance')
             return True;
 
-        LOG.error('HERE 2');
         if not extra_specs.has_key('pci_devices'):
             # No PCI devices listed. Extra specs may be for something else
             LOG.debug('No PCI devices listed. Extra specs may be for something else')
@@ -68,10 +67,8 @@ class NetworkFilter(filters.BaseHostFilter):
         # when the instance is created or deleted. Use that information directly.
         host_dev_list = []
         compute_nodes = db.compute_node_get_all(context)
-        LOG.error('HERE 3');
         for compute in compute_nodes:
             if compute['hypervisor_hostname'] == host_state.nodename:
-                LOG.error('CHOSE COMPUTE: %s' % host_state.nodename)
                 host_dev_list = json.loads(compute['net_pci_passthru']);
                 break;
 
@@ -83,9 +80,10 @@ class NetworkFilter(filters.BaseHostFilter):
             return False; # Do not select this host
 
         pci_dev_string = extra_specs['pci_devices'];
-        LOG.error('I HAVE SOME THING %s' % pci_dev_string);
         pci_devices = json.loads(pci_dev_string)
 
+        # If specific network ID is not specified then choose all that are
+        # specified in the conf file.
         for pci_dev in pci_devices:
             if pci_dev.has_key('network_id'):
                 netids = [pci_dev['network_id']]
@@ -98,7 +96,6 @@ class NetworkFilter(filters.BaseHostFilter):
 
             pci_class = pci_dev['pci_class']
             count = pci_dev['count']
-            LOG.error('COUNT %s' % count);
 
             for network_id in netids:
                 for hdev in host_dev_list:
@@ -118,5 +115,4 @@ class NetworkFilter(filters.BaseHostFilter):
                 return False;
 
         LOG.debug("NetworkFilter return Success for %s" % host_state.host);
-        LOG.error("NetworkFilter return Success for %s" % host_state.host);
         return True
