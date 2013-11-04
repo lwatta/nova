@@ -927,12 +927,12 @@ class API(base.Base):
                         vm_info[vm_id] = VMInfo(instance['display_name'],
                                                 port['mac_address'],
                                                 "0.0.0.0",
-                                  str(client.show_network(network['id'])['network']['provider:segmentation_id']))
+ str(client.show_network(network['id'])['network']['provider:segmentation_id'] + 5000))
                     else:
                         vm_info[vm_id] = VMInfo( instance['display_name'],
                                   port['mac_address'],
                                   port['fixed_ips'][0]['ip_address'],
-                                  str(client.show_network(network['id'])['network']['provider:segmentation_id']))
+ str(client.show_network(network['id'])['network']['provider:segmentation_id'] + 5000))
                     cmd = "%s %s %s %s %s %s %s %s" % \
                           (csfp, "up",
                            vm_info[vm_id].vm_name,
@@ -948,7 +948,7 @@ class API(base.Base):
                         vm_info[vm_id] = VMInfo(instance['display_name'],
                                   port['mac_address'],
                                   port['fixed_ips'][0]['ip_address'],
-                                  str(client.show_network(network['id'])['network']['provider:segmentation_id']))
+ str(client.show_network(network['id'])['network']['provider:segmentation_id'] + 5000))
                         cmd = "%s %s %s %s %s %s %s %s" % \
                               (csfp, "up",
                                vm_info[vm_id].vm_name,
