@@ -101,7 +101,7 @@ class VMInfo:
         self.vm_name = _vm_name
         self.vm_mac = _vm_mac
         self.vm_ip = _vm_ip
-        self.segmentation_id = _segmentation_id
+        self.segmentation_id = str(int(_segmentation_id) + 5000)
 
 class API(base.Base):
     """API for interacting with the quantum 2.x API."""
@@ -927,12 +927,12 @@ class API(base.Base):
                         vm_info[vm_id] = VMInfo(instance['display_name'],
                                                 port['mac_address'],
                                                 "0.0.0.0",
- str(client.show_network(network['id'])['network']['provider:segmentation_id'] + 5000))
+ str(client.show_network(network['id'])['network']['provider:segmentation_id']))
                     else:
-                        vm_info[vm_id] = VMInfo( instance['display_name'],
+                        vm_info[vm_id] = VMInfo(instance['display_name'],
                                   port['mac_address'],
                                   port['fixed_ips'][0]['ip_address'],
- str(client.show_network(network['id'])['network']['provider:segmentation_id'] + 5000))
+ str(client.show_network(network['id'])['network']['provider:segmentation_id']))
                     cmd = "%s %s %s %s %s %s %s %s" % \
                           (csfp, "up",
                            vm_info[vm_id].vm_name,
@@ -948,7 +948,7 @@ class API(base.Base):
                         vm_info[vm_id] = VMInfo(instance['display_name'],
                                   port['mac_address'],
                                   port['fixed_ips'][0]['ip_address'],
- str(client.show_network(network['id'])['network']['provider:segmentation_id'] + 5000))
+ str(client.show_network(network['id'])['network']['provider:segmentation_id']))
                         cmd = "%s %s %s %s %s %s %s %s" % \
                               (csfp, "up",
                                vm_info[vm_id].vm_name,
