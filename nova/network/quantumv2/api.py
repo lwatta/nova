@@ -341,9 +341,6 @@ class API(base.Base):
         LOG.debug(_('deallocate_for_instance() for %s'),
                   instance['display_name'])
         global vm_info
-        vm_id = ""
-        if (instance['uuid'] in vm_info.keys()):
-            vm_id = instance['uuid']
         networks = self._get_available_networks(context,
                                          instance['project_id'])
         search_opts = {'device_id': instance['uuid']}
@@ -354,24 +351,24 @@ class API(base.Base):
             gw_mac = ''
             for net in networks:
                 if port['network_id'] == net['id']:
-                    fwd_mode = net['forwarding_mode']
-                    gw_mac = net['gateway_mac']
+                    fwd_mode = net.get('forwarding_mode', '')
+                    gw_mac = net.get('gateway_mac', '')
                     break
+            key = (instance['uuid'], port['mac_address'])
             try:
-                if len(vm_id) > 0:
+                if vm_info.get(key, False):
                     cmd = "%s %s %s %s %s %s %s" % \
                     (csfp, "down",
-                    vm_info[vm_id].vm_name,
-                    vm_info[vm_id].vm_mac,
-                    vm_info[vm_id].segmentation_id,
+                    vm_info[key].vm_name,
+                    vm_info[key].vm_mac,
+                    vm_info[key].segmentation_id,
                     fwd_mode, gw_mac)
                     output_c = subp.check_output(cmd, shell=True)
+                    del (vm_info[key])
                 quantumv2.get_client(context).delete_port(port['id'])
             except Exception as ex:
                 LOG.exception(_("Failed to delete quantum port %(portid)s ")
                               % {'portid': port['id']})
-        if len(vm_id) > 0:
-            del (vm_info[str(instance['uuid'])])
 
         self.trigger_security_group_members_refresh(context, instance)
         self.trigger_instance_remove_security_group_refresh(context, instance)
@@ -862,8 +859,8 @@ class API(base.Base):
             for net in networks:
                 if port['network_id'] == net['id']:
                     network_name = net['name']
-                    fwd_mode = net['forwarding_mode']
-                    gw_mac = net['gateway_mac']
+                    fwd_mode = net.get('forwarding_mode', '')
+                    gw_mac = net.get('gateway_mac', '')
                     break
 
             #Get DHCP Flag
@@ -918,44 +915,44 @@ class API(base.Base):
             if should_create_bridge is not None:
                 network['should_create_bridge'] = should_create_bridge
 
-            vm_id = instance['uuid']
-            if (vm_id not in vm_info.keys()):
+            key = (instance['uuid'], port['mac_address'])
+            if not vm_info.get(key, False):
                 #is it a new VM?
                 if (instance['vm_state'] != "active"):
                     #new vm
                     if (dhcp_enabled == False):
-                        vm_info[vm_id] = VMInfo(instance['display_name'],
+                        vm_info[key] = VMInfo(instance['display_name'],
                                                 port['mac_address'],
                                                 "0.0.0.0",
  str(client.show_network(network['id'])['network']['provider:segmentation_id']))
                     else:
-                        vm_info[vm_id] = VMInfo(instance['display_name'],
+                        vm_info[key] = VMInfo(instance['display_name'],
                                   port['mac_address'],
                                   port['fixed_ips'][0]['ip_address'],
  str(client.show_network(network['id'])['network']['provider:segmentation_id']))
                     cmd = "%s %s %s %s %s %s %s %s" % \
                           (csfp, "up",
-                           vm_info[vm_id].vm_name,
-                           vm_info[vm_id].vm_mac,
-                           vm_info[vm_id].vm_ip,
-                           vm_info[vm_id].segmentation_id,
+                           vm_info[key].vm_name,
+                           vm_info[key].vm_mac,
+                           vm_info[key].vm_ip,
+                           vm_info[key].segmentation_id,
                            fwd_mode, gw_mac)
                     output_c = subp.check_output(cmd, shell = True)
                 elif (instance['task_state'] == None or \
                       instance['task_state'] == "migrating"):
                     if (instance['host'] != platform.node()):
                         #MIGRATING IN
-                        vm_info[vm_id] = VMInfo(instance['display_name'],
+                        vm_info[key] = VMInfo(instance['display_name'],
                                   port['mac_address'],
                                   port['fixed_ips'][0]['ip_address'],
  str(client.show_network(network['id'])['network']['provider:segmentation_id']))
                         cmd = "%s %s %s %s %s %s %s %s" % \
                               (csfp, "up",
-                               vm_info[vm_id].vm_name,
-                               vm_info[vm_id].vm_name,
-                               vm_info[vm_id].vm_mac,
-                               vm_info[vm_id].vm_ip,
-                               vm_info[vm_id].segmentation_id,
+                               vm_info[key].vm_name,
+                               vm_info[key].vm_name,
+                               vm_info[key].vm_mac,
+                               vm_info[key].vm_ip,
+                               vm_info[key].segmentation_id,
                                fwd_mode, gw_mac)
                         output_c = subp.check_output(cmd, shell = True)
             else:
@@ -964,12 +961,12 @@ class API(base.Base):
                         #means I'm migrating out
                         cmd = "%s %s %s %s %s %s %s %s" % \
                               (csfp, "down",
-                               vm_info[vm_id].vm_name,
-                               vm_info[vm_id].vm_mac,
-                               vm_info[vm_id].segmentation_id,
+                               vm_info[key].vm_name,
+                               vm_info[key].vm_mac,
+                               vm_info[key].segmentation_id,
                                fwd_mode, gw_mac)
                         output_c = subp.check_output(cmd, shell = True)
-                        del (vm_info[vm_id])
+                        del (vm_info[key])
 
             nw_info.append(network_model.VIF(
                 id=port['id'],
