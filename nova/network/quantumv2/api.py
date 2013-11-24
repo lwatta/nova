@@ -916,9 +916,10 @@ class API(base.Base):
                 network['should_create_bridge'] = should_create_bridge
 
             key = (instance['uuid'], port['mac_address'])
+            vmstate = instance['vm_state'].lower()
             if not vm_info.get(key, False):
                 #is it a new VM?
-                if (instance['vm_state'] != "active"):
+                if vmstate != "active":
                     #new vm
                     if (dhcp_enabled == False):
                         vm_info[key] = VMInfo(instance['display_name'],
@@ -949,17 +950,15 @@ class API(base.Base):
                         cmd = "%s %s %s %s %s %s %s %s" % \
                               (csfp, "up",
                                vm_info[key].vm_name,
-                               vm_info[key].vm_name,
                                vm_info[key].vm_mac,
                                vm_info[key].vm_ip,
                                vm_info[key].segmentation_id,
                                fwd_mode, gw_mac)
                         output_c = subp.check_output(cmd, shell = True)
-            else:
-                if (instance['task_state'] == "migrating"):
+            elif (instance['task_state'] == "migrating"):
                     if (instance['host'] == platform.node()):
                         #means I'm migrating out
-                        cmd = "%s %s %s %s %s %s %s %s" % \
+                        cmd = "%s %s %s %s %s %s %s" % \
                               (csfp, "down",
                                vm_info[key].vm_name,
                                vm_info[key].vm_mac,
@@ -967,6 +966,15 @@ class API(base.Base):
                                fwd_mode, gw_mac)
                         output_c = subp.check_output(cmd, shell = True)
                         del (vm_info[key])
+            elif vmstate == 'active':
+                cmd = "%s %s %s %s %s %s %s %s" % \
+                      (csfp, "up",
+                       vm_info[key].vm_name,
+                       vm_info[key].vm_mac,
+                       vm_info[key].vm_ip,
+                       vm_info[key].segmentation_id,
+                       fwd_mode, gw_mac)
+                output_c = subp.check_output(cmd, shell = True)
 
             nw_info.append(network_model.VIF(
                 id=port['id'],
