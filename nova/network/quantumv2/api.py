@@ -79,6 +79,7 @@ quantum_opts = [
 Config = ConfigParser.ConfigParser()
 Config.read('/etc/vinci.ini')
 csfp = Config.get('vinci','vinci_location') + "/files/client_sample"
+tun_base = Config.get('openstack','dfa_tunnel_base')
 
 
 
@@ -101,7 +102,7 @@ class VMInfo:
         self.vm_name = _vm_name
         self.vm_mac = _vm_mac
         self.vm_ip = _vm_ip
-        self.segmentation_id = str(int(_segmentation_id) + 5000)
+        self.segmentation_id = str(int(_segmentation_id) + int(tun_base))
 
 class API(base.Base):
     """API for interacting with the quantum 2.x API."""
