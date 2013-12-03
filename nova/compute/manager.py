@@ -668,10 +668,9 @@ class ComputeManager(manager.SchedulerDependentManager):
                 return
 
         net_info = compute_utils.get_nw_info_for_instance(instance)
-        try:
-            self.driver.plug_vifs(instance, net_info)
-        except NotImplementedError as e:
-            LOG.debug(e, instance=instance)
+
+        self.driver.plug_vifs(instance, net_info)
+
         if instance['task_state'] == task_states.RESIZE_MIGRATING:
             # We crashed during resize/migration, so roll back for safety
             try:
@@ -684,7 +683,7 @@ class ComputeManager(manager.SchedulerDependentManager):
                 block_dev_info = self._get_instance_volume_block_device_info(
                             context, instance)
 
-                self.driver.finish_revert_migration(context,
+                self.driver.finish_revert_migration(
                     instance, net_info, block_dev_info, power_on)
 
             except Exception as e:
@@ -860,12 +859,7 @@ class ComputeManager(manager.SchedulerDependentManager):
         """
         @utils.synchronized(instance['uuid'])
         def _sync_refresh():
-            try:
-                return self.driver.refresh_instance_security_rules(instance)
-            except NotImplementedError:
-                LOG.warning(_('Hypervisor driver does not support '
-                              'security groups.'), instance=instance)
-
+            return self.driver.refresh_instance_security_rules(instance)
         return _sync_refresh()
 
     @wrap_exception()
@@ -2844,7 +2838,7 @@ class ComputeManager(manager.SchedulerDependentManager):
                     context, instance, refresh_conn_info=True)
 
             power_on = old_vm_state != vm_states.STOPPED
-            self.driver.finish_revert_migration(context, instance,
+            self.driver.finish_revert_migration(instance,
                                        network_info,
                                        block_device_info, power_on)
 
@@ -3462,10 +3456,7 @@ class ComputeManager(manager.SchedulerDependentManager):
 
     def _unshelve_instance(self, context, instance, image):
         self._notify_about_instance_usage(context, instance, 'unshelve.start')
-        compute_info = self._get_compute_info(context.elevated(), self.host)
         instance.task_state = task_states.SPAWNING
-        instance.node = compute_info['hypervisor_hostname']
-        instance.host = self.host
         instance.save()
 
         network_info = self._get_instance_nw_info(context, instance)
@@ -3473,11 +3464,6 @@ class ComputeManager(manager.SchedulerDependentManager):
                 context, instance, legacy=False)
         block_device_info = self._prep_block_device(context, instance, bdms)
         scrubbed_keys = self._unshelve_instance_key_scrub(instance)
-
-        if image:
-            shelved_image_ref = instance.image_ref
-            instance.image_ref = image['id']
-
         try:
             self.driver.spawn(context, instance, image, injected_files=[],
                     admin_password=None,
@@ -3488,7 +3474,6 @@ class ComputeManager(manager.SchedulerDependentManager):
                 LOG.exception(_('Instance failed to spawn'), instance=instance)
 
         if image:
-            instance.image_ref = shelved_image_ref
             image_service = glance.get_default_image_service()
             image_service.delete(context, image['id'])
 
@@ -4160,8 +4145,8 @@ class ComputeManager(manager.SchedulerDependentManager):
         # No instance booting at source host, but instance dir
         # must be deleted for preparing next block migration
         # must be deleted for preparing next live migration w/o shared storage
-        is_shared_block_storage = True
-        is_shared_instance_path = True
+        is_shared_block_storage = False
+        is_shared_instance_path = False
         if migrate_data:
             is_shared_block_storage = migrate_data.get(
                     'is_shared_block_storage', True)
@@ -4170,17 +4155,14 @@ class ComputeManager(manager.SchedulerDependentManager):
 
         if block_migration or not is_shared_instance_path:
             self.driver.destroy(instance_ref, network_info,
-                    destroy_disks=not is_shared_block_storage,
-                    migrate_data=migrate_data)
+                    destroy_disks = not is_shared_block_storage)
         else:
             # self.driver.destroy() usually performs  vif unplugging
             # but we must do it explicitly here when block_migration
             # is false, as the network devices at the source must be
             # torn down
-            try:
-                self.driver.unplug_vifs(instance_ref, network_info)
-            except NotImplementedError as e:
-                LOG.debug(e, instance=instance_ref)
+            self.driver.unplug_vifs(instance_ref, network_info)
+
         # NOTE(tr3buchet): tear down networks on source host
         self.network_api.setup_networks_on_host(ctxt, instance_ref,
                                                 self.host, teardown=True)
@@ -4303,10 +4285,9 @@ class ComputeManager(manager.SchedulerDependentManager):
                     'is_shared_block_storage', True)
             is_shared_instance_path = migrate_data.get(
                     'is_shared_instance_path', True)
-        if block_migration or (
-                is_shared_block_storage and not is_shared_instance_path):
+        if block_migration or (is_shared_block_storage and not is_shared_instance_path):
             self.compute_rpcapi.rollback_live_migration_at_destination(context,
-                    instance, dest, destroy_disks=not is_shared_block_storage)
+                    instance, dest, destroy_disks = not is_shared_block_storage)
 
         self._notify_about_instance_usage(context, instance,
                                           "live_migration._rollback.end")
@@ -4358,76 +4339,38 @@ class ComputeManager(manager.SchedulerDependentManager):
             return
         self._last_info_cache_heal = curr_time
 
-        instance_uuids = getattr(self, '_instance_uuids_to_heal', [])
+        instance_uuids = getattr(self, '_instance_uuids_to_heal', None)
         instance = None
 
-        LOG.debug(_('Starting heal instance info cache'))
-
-        if not instance_uuids:
-            # The list of instances to heal is empty so rebuild it
-            LOG.debug(_('Rebuilding the list of instances to heal'))
-            db_instances = instance_obj.InstanceList.get_by_host(
-                context, self.host, expected_attrs=[])
-            for inst in db_instances:
-                # We don't want to refersh the cache for instances
-                # which are building or deleting so don't put them
-                # in the list. If they are building they will get
-                # added to the list next time we build it.
-                if (inst.vm_state == vm_states.BUILDING):
-                    LOG.debug(_('Skipping network cache update for instance '
-                                'because it is Building.'), instance=inst)
-                    continue
-                if (inst.task_state == task_states.DELETING):
-                    LOG.debug(_('Skipping network cache update for instance '
-                                'because it is being deleted.'), instance=inst)
-                    continue
-
-                if not instance:
-                    # Save the first one we find so we don't
-                    # have to get it again
-                    instance = inst
-                else:
-                    instance_uuids.append(inst['uuid'])
-
-            self._instance_uuids_to_heal = instance_uuids
-        else:
-            # Find the next valid instance on the list
-            while instance_uuids:
+        while not instance or instance['host'] != self.host:
+            if instance_uuids:
                 try:
-                    inst = instance_obj.Instance.get_by_uuid(
-                            context, instance_uuids.pop(0),
-                            expected_attrs=['system_metadata', 'info_cache'])
+                    instance = instance_obj.Instance.get_by_uuid(
+                        context, instance_uuids.pop(0),
+                        expected_attrs=['system_metadata'])
                 except exception.InstanceNotFound:
                     # Instance is gone.  Try to grab another.
                     continue
+            else:
+                # No more in our copy of uuids.  Pull from the DB.
+                db_instances = instance_obj.InstanceList.get_by_host(
+                    context, self.host, expected_attrs=[])
+                if not db_instances:
+                    # None.. just return.
+                    return
+                instance = db_instances[0]
+                instance_uuids = [inst['uuid'] for inst in db_instances[1:]]
+                self._instance_uuids_to_heal = instance_uuids
 
-                # Check the instance hasn't been migrated
-                if inst.host != self.host:
-                    LOG.debug(_('Skipping network cache update for instance '
-                                'because it has been migrated to another '
-                                'host.'), instance=inst)
-                # Check the instance isn't being deleting
-                elif inst.task_state == task_states.DELETING:
-                    LOG.debug(_('Skipping network cache update for instance '
-                                'because it is being deleted.'), instance=inst)
-                else:
-                    instance = inst
-                    break
-
-        if instance:
-            # We have an instance now to refresh
-            try:
-                # Call to network API to get instance info.. this will
-                # force an update to the instance's info_cache
-                self._get_instance_nw_info(context, instance)
-                LOG.debug(_('Updated the network info_cache for instance'),
-                          instance=instance)
-            except Exception:
-                LOG.error(_('An error occurred while refreshing the network '
-                            'cache.'), instance=instance, exc_info=True)
-        else:
-            LOG.debug(_("Didn't find any instances for network info cache "
-                        "update."))
+        # We have an instance now and it's ours
+        try:
+            # Call to network API to get instance info.. this will
+            # force an update to the instance's info_cache
+            self._get_instance_nw_info(context, instance)
+            LOG.debug(_('Updated the info_cache for instance'),
+                      instance=instance)
+        except Exception as e:
+            LOG.debug(_("An error occurred: %s"), e)
 
     @periodic_task.periodic_task
     def _poll_rebooting_instances(self, context):
