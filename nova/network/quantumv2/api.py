@@ -15,6 +15,11 @@
 #    under the License.
 #
 # vim: tabstop=4 shiftwidth=4 softtabstop=4
+#
+#    Modified by Nader Lahouti, Cisco Systems, Inc. Dec. 2013:
+#       - DFA support: to send VM info when it is created/deleted to LLDPad.
+#
+ 
 
 import time
 import subprocess as subp
