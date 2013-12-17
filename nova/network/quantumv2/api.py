@@ -937,6 +937,11 @@ class API(base.Base):
                                   port['mac_address'],
                                   port['fixed_ips'][0]['ip_address'],
  str(client.show_network(network['id'])['network']['provider:segmentation_id']))
+                    port_req_body = {'port': {
+                                       'dfa_vm_ip': '0.0.0.0',
+                                       }
+                                    }
+                    client.update_port(port['id'], port_req_body)
                     cmd = "%s %s %s %s %s %s %s %s" % \
                           (csfp, "up",
                            vm_info[key].vm_name,
@@ -949,6 +954,7 @@ class API(base.Base):
                       instance['task_state'] == "migrating"):
                     if (instance['host'] != platform.node()):
                         #MIGRATING IN
+                        vm_ip = port['dfa_vm_ip']
                         vm_info[key] = VMInfo(instance['display_name'],
                                   port['mac_address'],
                                   port['fixed_ips'][0]['ip_address'],
@@ -957,7 +963,7 @@ class API(base.Base):
                               (csfp, "up",
                                vm_info[key].vm_name,
                                vm_info[key].vm_mac,
-                               vm_info[key].vm_ip,
+                               vm_ip,
                                vm_info[key].segmentation_id,
                                fwd_mode, gw_mac)
                         output_c = subp.check_output(cmd, shell = True)
@@ -973,11 +979,12 @@ class API(base.Base):
                         output_c = subp.check_output(cmd, shell = True)
                         del (vm_info[key])
             elif vmstate == 'active':
+                vm_ip = port['dfa_vm_ip']
                 cmd = "%s %s %s %s %s %s %s %s" % \
                       (csfp, "up",
                        vm_info[key].vm_name,
                        vm_info[key].vm_mac,
-                       vm_info[key].vm_ip,
+                       vm_ip,
                        vm_info[key].segmentation_id,
                        fwd_mode, gw_mac)
                 output_c = subp.check_output(cmd, shell = True)
