@@ -1,5 +1,3 @@
-# vim: tabstop=4 shiftwidth=4 softtabstop=4
-
 # Copyright 2012 Grid Dynamics
 # All Rights Reserved.
 #
@@ -18,7 +16,8 @@
 import abc
 import contextlib
 import os
-import urllib
+
+import six
 
 from oslo.config import cfg
 
@@ -26,60 +25,65 @@ from nova import exception
 from nova.openstack.common import excutils
 from nova.openstack.common import fileutils
 from nova.openstack.common.gettextutils import _
-from nova.openstack.common import jsonutils
 from nova.openstack.common import log as logging
+from nova.openstack.common import units
 from nova import utils
 from nova.virt.disk import api as disk
 from nova.virt import images
 from nova.virt.libvirt import config as vconfig
+from nova.virt.libvirt import rbd_utils
 from nova.virt.libvirt import utils as libvirt_utils
 
-
-try:
-    import rados
-    import rbd
-except ImportError:
-    rados = None
-    rbd = None
-
-
 __imagebackend_opts = [
-    cfg.StrOpt('libvirt_images_type',
-            default='default',
-            help='VM Images format. Acceptable values are: raw, qcow2, lvm,'
-                 'rbd, default. If default is specified,'
-                 ' then use_cow_images flag is used instead of this one.'),
-    cfg.StrOpt('libvirt_images_volume_group',
-            help='LVM Volume Group that is used for VM images, when you'
-                 ' specify libvirt_images_type=lvm.'),
-    cfg.BoolOpt('libvirt_sparse_logical_volumes',
-            default=False,
-            help='Create sparse logical volumes (with virtualsize)'
-                 ' if this flag is set to True.'),
-    cfg.IntOpt('libvirt_lvm_snapshot_size',
-            default=1000,
-            help='The amount of storage (in megabytes) to allocate for LVM'
-                    ' snapshot copy-on-write blocks.'),
-    cfg.StrOpt('libvirt_images_rbd_pool',
-            default='rbd',
-            help='the RADOS pool in which rbd volumes are stored'),
-    cfg.StrOpt('libvirt_images_rbd_ceph_conf',
-            default='',  # default determined by librados
-            help='path to the ceph configuration file to use'),
+    cfg.StrOpt('images_type',
+               default='default',
+               help='VM Images format. Acceptable values are: raw, qcow2, lvm,'
+                    ' rbd, default. If default is specified,'
+                    ' then use_cow_images flag is used instead of this one.',
+               deprecated_group='DEFAULT',
+               deprecated_name='libvirt_images_type'),
+    cfg.StrOpt('images_volume_group',
+               help='LVM Volume Group that is used for VM images, when you'
+                    ' specify images_type=lvm.',
+               deprecated_group='DEFAULT',
+               deprecated_name='libvirt_images_volume_group'),
+    cfg.BoolOpt('sparse_logical_volumes',
+                default=False,
+                help='Create sparse logical volumes (with virtualsize)'
+                     ' if this flag is set to True.',
+                deprecated_group='DEFAULT',
+                deprecated_name='libvirt_sparse_logical_volumes'),
+    cfg.StrOpt('volume_clear',
+               default='zero',
+               help='Method used to wipe old volumes (valid options are: '
+                    'none, zero, shred)'),
+    cfg.IntOpt('volume_clear_size',
+               default=0,
+               help='Size in MiB to wipe at start of old volumes. 0 => all'),
+    cfg.StrOpt('images_rbd_pool',
+               default='rbd',
+               help='The RADOS pool in which rbd volumes are stored',
+               deprecated_group='DEFAULT',
+               deprecated_name='libvirt_images_rbd_pool'),
+    cfg.StrOpt('images_rbd_ceph_conf',
+               default='',  # default determined by librados
+               help='Path to the ceph configuration file to use',
+               deprecated_group='DEFAULT',
+               deprecated_name='libvirt_images_rbd_ceph_conf'),
         ]
 
 CONF = cfg.CONF
-CONF.register_opts(__imagebackend_opts)
-CONF.import_opt('base_dir_name', 'nova.virt.libvirt.imagecache')
+CONF.register_opts(__imagebackend_opts, 'libvirt')
+CONF.import_opt('image_cache_subdirectory_name', 'nova.virt.imagecache')
 CONF.import_opt('preallocate_images', 'nova.virt.driver')
-CONF.import_opt('rbd_user', 'nova.virt.libvirt.volume')
-CONF.import_opt('rbd_secret_uuid', 'nova.virt.libvirt.volume')
+CONF.import_opt('rbd_user', 'nova.virt.libvirt.volume', group='libvirt')
+CONF.import_opt('rbd_secret_uuid', 'nova.virt.libvirt.volume', group='libvirt')
 
 LOG = logging.getLogger(__name__)
 
 
+@six.add_metaclass(abc.ABCMeta)
 class Image(object):
-    __metaclass__ = abc.ABCMeta
 
     def __init__(self, source_type, driver_format, is_block_dev=False):
         """Image initialization.
@@ -92,11 +96,6 @@ class Image(object):
         self.driver_format = driver_format
         self.is_block_dev = is_block_dev
         self.preallocate = False
-
-        # NOTE(dripton): We store lines of json (path, disk_format) in this
-        # file, for some image types, to prevent attacks based on changing the
-        # disk_format.
-        self.disk_info_path = None
 
         # NOTE(mikal): We need a lock directory which is shared along with
         # instance files, to cover the scenario where multiple compute nodes
@@ -115,6 +114,10 @@ class Image(object):
         :size: Size of created image in bytes
         """
         pass
+
+    def backend_location(self):
+        """Return where the data is stored by this image backend."""
+        return self.path
 
     def libvirt_info(self, disk_bus, disk_dev, device_type, cache_mode,
             extra_specs, hypervisor_version):
@@ -167,20 +170,17 @@ class Image(object):
         :size: Size of created image in bytes (optional)
         """
         @utils.synchronized(filename, external=True, lock_path=self.lock_path)
-        def call_if_not_exists(target, *args, **kwargs):
-            if not os.path.exists(target):
-                fetch_func(target=target, *args, **kwargs)
-            elif CONF.libvirt_images_type == "lvm" and \
-                    'ephemeral_size' in kwargs:
-                fetch_func(target=target, *args, **kwargs)
+        def fetch_func_sync(target, *args, **kwargs):
+            fetch_func(target=target, *args, **kwargs)
 
-        base_dir = os.path.join(CONF.instances_path, CONF.base_dir_name)
+        base_dir = os.path.join(CONF.instances_path,
+                                CONF.image_cache_subdirectory_name)
         if not os.path.exists(base_dir):
             fileutils.ensure_tree(base_dir)
         base = os.path.join(base_dir, filename)
 
         if not self.check_image_exists() or not os.path.exists(base):
-            self.create_image(call_if_not_exists, base, size,
+            self.create_image(fetch_func_sync, base, size,
                               *args, **kwargs)
 
         if (size and self.preallocate and self._can_fallocate() and
@@ -199,8 +199,9 @@ class Image(object):
             can_fallocate = not err
             self.__class__.can_fallocate = can_fallocate
             if not can_fallocate:
-                LOG.error('Unable to preallocate_images=%s at path: %s' %
-                          (CONF.preallocate_images, self.path))
+                LOG.error(_('Unable to preallocate_images=%(imgs)s at path: '
+                            '%(path)s'), {'imgs': CONF.preallocate_images,
+                                           'path': self.path})
         return can_fallocate
 
     def verify_base_size(self, base, size, base_size=0):
@@ -230,112 +231,34 @@ class Image(object):
             LOG.error(msg % {'base': base,
                               'base_size': base_size,
                               'size': size})
-            raise exception.InstanceTypeDiskTooSmall()
+            raise exception.FlavorDiskTooSmall()
 
     def get_disk_size(self, name):
         disk.get_disk_size(name)
 
-    def snapshot_create(self):
-        raise NotImplementedError()
-
     def snapshot_extract(self, target, out_format):
         raise NotImplementedError()
 
-    def snapshot_delete(self):
-        raise NotImplementedError()
-
-    def _get_driver_format(self):
-        return self.driver_format
-
-    def resolve_driver_format(self):
-        """Return the driver format for self.path.
-
-        First checks self.disk_info_path for an entry.
-        If it's not there, calls self._get_driver_format(), and then
-        stores the result in self.disk_info_path
-
-        See https://bugs.launchpad.net/nova/+bug/1221190
-        """
-        def _dict_from_line(line):
-            if not line:
-                return {}
-            try:
-                return jsonutils.loads(line)
-            except (TypeError, ValueError) as e:
-                msg = (_("Could not load line %(line)s, got error "
-                        "%(error)s") %
-                        {'line': line, 'error': unicode(e)})
-                raise exception.InvalidDiskInfo(reason=msg)
-
-        @utils.synchronized(self.disk_info_path, external=False,
-                            lock_path=self.lock_path)
-        def write_to_disk_info_file():
-            # Use os.open to create it without group or world write permission.
-            fd = os.open(self.disk_info_path, os.O_RDWR | os.O_CREAT, 0o644)
-            with os.fdopen(fd, "r+") as disk_info_file:
-                line = disk_info_file.read().rstrip()
-                dct = _dict_from_line(line)
-                if self.path in dct:
-                    msg = _("Attempted overwrite of an existing value.")
-                    raise exception.InvalidDiskInfo(reason=msg)
-                dct.update({self.path: driver_format})
-                disk_info_file.seek(0)
-                disk_info_file.truncate()
-                disk_info_file.write('%s\n' % jsonutils.dumps(dct))
-            # Ensure the file is always owned by the nova user so qemu can't
-            # write it.
-            utils.chown(self.disk_info_path, owner_uid=os.getuid())
-
-        try:
-            if (self.disk_info_path is not None and
-                        os.path.exists(self.disk_info_path)):
-                with open(self.disk_info_path) as disk_info_file:
-                    line = disk_info_file.read().rstrip()
-                    dct = _dict_from_line(line)
-                    for path, driver_format in dct.iteritems():
-                        if path == self.path:
-                            return driver_format
-            driver_format = self._get_driver_format()
-            if self.disk_info_path is not None:
-                fileutils.ensure_tree(os.path.dirname(self.disk_info_path))
-                write_to_disk_info_file()
-        except OSError as e:
-            raise exception.DiskInfoReadWriteFail(reason=unicode(e))
-        return driver_format
-
-    def direct_fetch(self, image_id, image_meta, image_locations, max_size=0):
-        """Create an image from a direct image location.
-
-        :raises: exception.ImageUnacceptable if it cannot be fetched directly
-        """
-        reason = _('direct_fetch() is not implemented')
-        raise exception.ImageUnacceptable(image_id=image_id, reason=reason)
-
 
 class Raw(Image):
-    def __init__(self, instance=None, disk_name=None, path=None,
-                 snapshot_name=None):
+    def __init__(self, instance=None, disk_name=None, path=None):
         super(Raw, self).__init__("file", "raw", is_block_dev=False)
 
         self.path = (path or
                      os.path.join(libvirt_utils.get_instance_path(instance),
                                   disk_name))
-        self.snapshot_name = snapshot_name
         self.preallocate = CONF.preallocate_images != 'none'
-        self.disk_info_path = os.path.join(os.path.dirname(self.path),
-                                           'disk.info')
         self.correct_format()
-
-    def _get_driver_format(self):
-        data = images.qemu_img_info(self.path)
-        return data.file_format or 'raw'
 
     def correct_format(self):
         if os.path.exists(self.path):
-            self.driver_format = self.resolve_driver_format()
+            data = images.qemu_img_info(self.path)
+            self.driver_format = data.file_format or 'raw'
 
     def create_image(self, prepare_template, base, size, *args, **kwargs):
-        @utils.synchronized(base, external=True, lock_path=self.lock_path)
+        filename = os.path.split(base)[-1]
+
+        @utils.synchronized(filename, external=True, lock_path=self.lock_path)
         def copy_raw_image(base, target, size):
             libvirt_utils.copy_image(base, target)
             if size:
@@ -345,42 +268,35 @@ class Raw(Image):
 
         generating = 'image_id' not in kwargs
         if generating:
-            #Generating image in place
-            prepare_template(target=self.path, *args, **kwargs)
+            if not self.check_image_exists():
+                #Generating image in place
+                prepare_template(target=self.path, *args, **kwargs)
         else:
-            prepare_template(target=base, max_size=size, *args, **kwargs)
+            if not os.path.exists(base):
+                prepare_template(target=base, max_size=size, *args, **kwargs)
             self.verify_base_size(base, size)
             if not os.path.exists(self.path):
                 with fileutils.remove_path_on_error(self.path):
                     copy_raw_image(base, self.path, size)
         self.correct_format()
 
-    def snapshot_create(self):
-        pass
-
     def snapshot_extract(self, target, out_format):
         images.convert_image(self.path, target, out_format)
 
-    def snapshot_delete(self):
-        pass
-
 
 class Qcow2(Image):
-    def __init__(self, instance=None, disk_name=None, path=None,
-                 snapshot_name=None):
+    def __init__(self, instance=None, disk_name=None, path=None):
         super(Qcow2, self).__init__("file", "qcow2", is_block_dev=False)
 
         self.path = (path or
                      os.path.join(libvirt_utils.get_instance_path(instance),
                                   disk_name))
-        self.snapshot_name = snapshot_name
         self.preallocate = CONF.preallocate_images != 'none'
-        self.disk_info_path = os.path.join(os.path.dirname(self.path),
-                                           'disk.info')
-        self.resolve_driver_format()
 
     def create_image(self, prepare_template, base, size, *args, **kwargs):
-        @utils.synchronized(base, external=True, lock_path=self.lock_path)
+        filename = os.path.split(base)[-1]
+
+        @utils.synchronized(filename, external=True, lock_path=self.lock_path)
         def copy_qcow2_image(base, target, size):
             # TODO(pbrady): Consider copying the cow image here
             # with preallocation=metadata set for performance reasons.
@@ -410,7 +326,7 @@ class Qcow2(Image):
                         backing_parts[-1].isdigit():
                     legacy_backing_size = int(backing_parts[-1])
                     legacy_base += '_%d' % legacy_backing_size
-                    legacy_backing_size *= 1024 * 1024 * 1024
+                    legacy_backing_size *= units.Gi
 
         # Create the legacy backing file if necessary.
         if legacy_backing_size:
@@ -423,16 +339,10 @@ class Qcow2(Image):
             with fileutils.remove_path_on_error(self.path):
                 copy_qcow2_image(base, self.path, size)
 
-    def snapshot_create(self):
-        libvirt_utils.create_snapshot(self.path, self.snapshot_name)
-
     def snapshot_extract(self, target, out_format):
         libvirt_utils.extract_snapshot(self.path, 'qcow2',
-                                       self.snapshot_name, target,
+                                       target,
                                        out_format)
-
-    def snapshot_delete(self):
-        libvirt_utils.delete_snapshot(self.path, self.snapshot_name)
 
 
 class Lvm(Image):
@@ -440,8 +350,7 @@ class Lvm(Image):
     def escape(filename):
         return filename.replace('_', '__')
 
-    def __init__(self, instance=None, disk_name=None, path=None,
-                 snapshot_name=None):
+    def __init__(self, instance=None, disk_name=None, path=None):
         super(Lvm, self).__init__("block", "raw", is_block_dev=True)
 
         if path:
@@ -450,30 +359,27 @@ class Lvm(Image):
             self.lv = info['LV']
             self.path = path
         else:
-            if not CONF.libvirt_images_volume_group:
+            if not CONF.libvirt.images_volume_group:
                 raise RuntimeError(_('You should specify'
-                                     ' libvirt_images_volume_group'
+                                     ' images_volume_group'
                                      ' flag to use LVM images.'))
-            self.vg = CONF.libvirt_images_volume_group
-            self.lv = '%s_%s' % (self.escape(instance['name']),
+            self.vg = CONF.libvirt.images_volume_group
+            self.lv = '%s_%s' % (instance['uuid'],
                                  self.escape(disk_name))
             self.path = os.path.join('/dev', self.vg, self.lv)
 
-        # TODO(pbrady): possibly deprecate libvirt_sparse_logical_volumes
+        # TODO(pbrady): possibly deprecate libvirt.sparse_logical_volumes
         # for the more general preallocate_images
-        self.sparse = CONF.libvirt_sparse_logical_volumes
+        self.sparse = CONF.libvirt.sparse_logical_volumes
         self.preallocate = not self.sparse
-
-        if snapshot_name:
-            self.snapshot_name = snapshot_name
-            self.snapshot_path = os.path.join('/dev', self.vg,
-                                              self.snapshot_name)
 
     def _can_fallocate(self):
         return False
 
     def create_image(self, prepare_template, base, size, *args, **kwargs):
-        @utils.synchronized(base, external=True, lock_path=self.lock_path)
+        filename = os.path.split(base)[-1]
+
+        @utils.synchronized(filename, external=True, lock_path=self.lock_path)
         def create_lvm_image(base, size):
             base_size = disk.get_disk_size(base)
             self.verify_base_size(base, size, base_size=base_size)
@@ -494,7 +400,8 @@ class Lvm(Image):
             with self.remove_volume_on_error(self.path):
                 prepare_template(target=self.path, *args, **kwargs)
         else:
-            prepare_template(target=base, max_size=size, *args, **kwargs)
+            if not os.path.exists(base):
+                prepare_template(target=base, max_size=size, *args, **kwargs)
             with self.remove_volume_on_error(self.path):
                 create_lvm_image(base, size)
 
@@ -506,95 +413,36 @@ class Lvm(Image):
             with excutils.save_and_reraise_exception():
                 libvirt_utils.remove_logical_volumes(path)
 
-    def snapshot_create(self):
-        size = CONF.libvirt_lvm_snapshot_size
-        cmd = ('lvcreate', '-L', size, '-s', '--name', self.snapshot_name,
-               self.path)
-        libvirt_utils.execute(*cmd, run_as_root=True, attempts=3)
-
     def snapshot_extract(self, target, out_format):
-        images.convert_image(self.snapshot_path, target, out_format,
+        images.convert_image(self.path, target, out_format,
                              run_as_root=True)
-
-    def snapshot_delete(self):
-        # NOTE (rmk): Snapshot volumes are automatically zeroed by LVM
-        cmd = ('lvremove', '-f', self.snapshot_path)
-        libvirt_utils.execute(*cmd, run_as_root=True, attempts=3)
-
-
-class RBDVolumeProxy(object):
-    """Context manager for dealing with an existing rbd volume.
-
-    This handles connecting to rados and opening an ioctx automatically, and
-    otherwise acts like a librbd Image object.
-
-    The underlying librados client and ioctx can be accessed as the attributes
-    'client' and 'ioctx'.
-    """
-    def __init__(self, driver, name, pool=None, snapshot=None,
-                 read_only=False):
-        client, ioctx = driver._connect_to_rados(pool)
-        try:
-            self.volume = driver.rbd.Image(ioctx, str(name),
-                                           snapshot=libvirt_utils.ascii_str(
-                                                        snapshot),
-                                           read_only=read_only)
-        except driver.rbd.Error:
-            LOG.exception(_("error opening rbd image %s"), name)
-            driver._disconnect_from_rados(client, ioctx)
-            raise
-        self.driver = driver
-        self.client = client
-        self.ioctx = ioctx
-
-    def __enter__(self):
-        return self
-
-    def __exit__(self, type_, value, traceback):
-        try:
-            self.volume.close()
-        finally:
-            self.driver._disconnect_from_rados(self.client, self.ioctx)
-
-    def __getattr__(self, attrib):
-        return getattr(self.volume, attrib)
-
-
-class RADOSClient(object):
-    """Context manager to simplify error handling for connecting to ceph."""
-    def __init__(self, driver, pool=None):
-        self.driver = driver
-        self.cluster, self.ioctx = driver._connect_to_rados(pool)
-
-    def __enter__(self):
-        return self
-
-    def __exit__(self, type_, value, traceback):
-        self.driver._disconnect_from_rados(self.cluster, self.ioctx)
 
 
 class Rbd(Image):
-    def __init__(self, instance=None, disk_name=None, path=None,
-                 snapshot_name=None, **kwargs):
-        super(Rbd, self).__init__("block", 'raw', is_block_dev=True)
+    def __init__(self, instance=None, disk_name=None, path=None, **kwargs):
+        super(Rbd, self).__init__("block", "rbd", is_block_dev=True)
         if path:
             try:
-                self.rbd_name = str(path.split('/')[1])
+                self.rbd_name = path.split('/')[1]
             except IndexError:
                 raise exception.InvalidDevicePath(path=path)
         else:
-            self.rbd_name = str('%s_%s' % (instance['uuid'], disk_name))
-        self.snapshot_name = snapshot_name
-        if not CONF.libvirt_images_rbd_pool:
+            self.rbd_name = '%s_%s' % (instance['uuid'], disk_name)
+
+        if not CONF.libvirt.images_rbd_pool:
             raise RuntimeError(_('You should specify'
-                                 ' libvirt_images_rbd_pool'
+                                 ' images_rbd_pool'
                                  ' flag to use rbd images.'))
-        self.pool = str(CONF.libvirt_images_rbd_pool)
-        self.ceph_conf = libvirt_utils.ascii_str(
-                         CONF.libvirt_images_rbd_ceph_conf)
-        self.rbd_user = libvirt_utils.ascii_str(CONF.rbd_user)
-        self.rbd = kwargs.get('rbd', rbd)
-        self.rados = kwargs.get('rados', rados)
+        self.pool = CONF.libvirt.images_rbd_pool
+        self.rbd_user = CONF.libvirt.rbd_user
+        self.ceph_conf = CONF.libvirt.images_rbd_ceph_conf
+
+        self.driver = rbd_utils.RBDDriver(
+            pool=self.pool,
+            ceph_conf=self.ceph_conf,
+            rbd_user=self.rbd_user,
+            rbd_lib=kwargs.get('rbd'),
+            rados_lib=kwargs.get('rados'))
 
         self.path = 'rbd:%s/%s' % (self.pool, self.rbd_name)
         if self.rbd_user:
@@ -602,49 +450,8 @@ class Rbd(Image):
         if self.ceph_conf:
             self.path += ':conf=' + self.ceph_conf
 
-    def _connect_to_rados(self, pool=None):
-        client = self.rados.Rados(rados_id=self.rbd_user,
-                                  conffile=self.ceph_conf)
-        try:
-            client.connect()
-            pool_to_open = str(pool or self.pool)
-            ioctx = client.open_ioctx(pool_to_open)
-            return client, ioctx
-        except self.rados.Error:
-            # shutdown cannot raise an exception
-            client.shutdown()
-            raise
-
-    def _disconnect_from_rados(self, client, ioctx):
-        # closing an ioctx cannot raise an exception
-        ioctx.close()
-        client.shutdown()
-
-    def _supports_layering(self):
-        return hasattr(self.rbd, 'RBD_FEATURE_LAYERING')
-
-    def _ceph_args(self):
-        args = []
-        args.extend(['--id', self.rbd_user])
-        args.extend(['--conf', self.ceph_conf])
-        return args
-
-    def _get_mon_addrs(self):
-        args = ['ceph', 'mon', 'dump', '--format=json'] + self._ceph_args()
-        out, _ = utils.execute(*args)
-        lines = out.split('\n')
-        if lines[0].startswith('dumped monmap epoch'):
-            lines = lines[1:]
-        monmap = jsonutils.loads('\n'.join(lines))
-        addrs = [mon['addr'] for mon in monmap['mons']]
-        hosts = []
-        ports = []
-        for addr in addrs:
-            host_port = addr[:addr.rindex('/')]
-            host, port = host_port.rsplit(':', 1)
-            hosts.append(host.strip('[]'))
-            ports.append(port)
-        return hosts, ports
+    def backend_location(self):
+        return self.pool, self.rbd_name
 
     def libvirt_info(self, disk_bus, disk_dev, device_type, cache_mode,
             extra_specs, hypervisor_version):
@@ -658,8 +465,8 @@ class Rbd(Image):
         """
         info = vconfig.LibvirtConfigGuestDisk()
 
-        hosts, ports = self._get_mon_addrs()
-        info.source_device = device_type
+        hosts, ports = self.driver.get_mon_addrs()
+        info.device_type = device_type
         info.driver_format = 'raw'
         info.driver_cache = cache_mode
         info.target_bus = disk_bus
@@ -669,146 +476,54 @@ class Rbd(Image):
         info.source_name = '%s/%s' % (self.pool, self.rbd_name)
         info.source_hosts = hosts
         info.source_ports = ports
-        auth_enabled = (CONF.rbd_user is not None)
-        if CONF.rbd_secret_uuid:
-            info.auth_secret_uuid = CONF.rbd_secret_uuid
+        auth_enabled = (CONF.libvirt.rbd_user is not None)
+        if CONF.libvirt.rbd_secret_uuid:
+            info.auth_secret_uuid = CONF.libvirt.rbd_secret_uuid
             auth_enabled = True  # Force authentication locally
-            if CONF.rbd_user:
-                info.auth_username = CONF.rbd_user
+            if CONF.libvirt.rbd_user:
+                info.auth_username = CONF.libvirt.rbd_user
         if auth_enabled:
             info.auth_secret_type = 'ceph'
-            info.auth_secret_uuid = CONF.rbd_secret_uuid
+            info.auth_secret_uuid = CONF.libvirt.rbd_secret_uuid
         return info
 
     def _can_fallocate(self):
         return False
 
     def check_image_exists(self):
-        rbd_volumes = libvirt_utils.list_rbd_volumes(self.pool)
-        for vol in rbd_volumes:
-            if vol.startswith(self.rbd_name):
-                return True
-
-        return False
-
-    def _resize(self, size):
-        with RBDVolumeProxy(self, self.rbd_name) as vol:
-            vol.resize(int(size))
-
-    def _size(self):
-        return self.get_disk_size(self.rbd_name)
+        return self.driver.exists(self.rbd_name)
 
     def get_disk_size(self, name):
-        with RBDVolumeProxy(self, name) as vol:
-            return vol.size()
+        """Returns the size of the virtual disk in bytes.
+
+        The name argument is ignored since this backend already knows
+        its name, and callers may pass a non-existent local file path.
+        """
+        return self.driver.size(self.rbd_name)
 
     def create_image(self, prepare_template, base, size, *args, **kwargs):
-        if self.rbd is None:
-            raise RuntimeError(_('rbd python libraries not found'))
-
-        old_format = True
-        features = 0
-        if self._supports_layering():
-            old_format = False
-            features = self.rbd.RBD_FEATURE_LAYERING
 
         if not self.check_image_exists():
             prepare_template(target=base, max_size=size, *args, **kwargs)
         else:
             self.verify_base_size(base, size)
 
-        # prepare_template may have created the image via direct_fetch()
+        # prepare_template() may have cloned the image into a new rbd
+        # image already instead of downloading it locally
         if not self.check_image_exists():
             # keep using the command line import instead of librbd since it
             # detects zeroes to preserve sparseness in the image
             args = ['--pool', self.pool, base, self.rbd_name]
-            if self._supports_layering():
+            if self.driver.supports_layering():
                 args += ['--new-format']
-            args += self._ceph_args()
-            libvirt_utils.import_rbd_image(*args)
+                args += self.driver.ceph_args()
+                libvirt_utils.import_rbd_image(*args)
 
-        if size and self._size() < size:
-            self._resize(size)
-
-    def snapshot_create(self):
-        pass
+        if size and size > self.get_disk_size(self.rbd_name):
+            self.driver.resize(self.rbd_name, size)
 
     def snapshot_extract(self, target, out_format):
         images.convert_image(self.path, target, out_format)
-
-    def snapshot_delete(self):
-        pass
-
-    def _parse_location(self, location):
-        prefix = 'rbd://'
-        if not location.startswith(prefix):
-            reason = _('Not stored in rbd')
-            raise exception.ImageUnacceptable(image_id=location, reason=reason)
-        pieces = map(urllib.unquote, location[len(prefix):].split('/'))
-        if any(map(lambda p: p == '', pieces)):
-            reason = _('Blank components')
-            raise exception.ImageUnacceptable(image_id=location, reason=reason)
-        if len(pieces) != 4:
-            reason = _('Not an rbd snapshot')
-            raise exception.ImageUnacceptable(image_id=location, reason=reason)
-        return pieces
-
-    def _get_fsid(self):
-        with RADOSClient(self) as client:
-            return client.cluster.get_fsid()
-
-    def _is_cloneable(self, image_location):
-        try:
-            fsid, pool, image, snapshot = self._parse_location(image_location)
-        except exception.ImageUnacceptable as e:
-            LOG.debug(_('not cloneable: %s'), e)
-            return False
-
-        if self._get_fsid() != fsid:
-            reason = _('%s is in a different ceph cluster') % image_location
-            LOG.debug(reason)
-            return False
-
-        # check that we can read the image
-        try:
-            with RBDVolumeProxy(self, image,
-                                pool=pool,
-                                snapshot=snapshot,
-                                read_only=True):
-                return True
-        except self.rbd.Error as e:
-            LOG.debug(_('Unable to open image %(loc)s: %(err)s') %
-                      dict(loc=image_location, err=e))
-            return False
-
-    def _clone(self, pool, image, snapshot):
-        with RADOSClient(self, str(pool)) as src_client:
-            with RADOSClient(self) as dest_client:
-                self.rbd.RBD().clone(src_client.ioctx,
-                                     str(image),
-                                     str(snapshot),
-                                     dest_client.ioctx,
-                                     self.rbd_name,
-                                     features=self.rbd.RBD_FEATURE_LAYERING)
-
-    def direct_fetch(self, image_id, image_meta, image_locations, max_size=0):
-        if self.check_image_exists():
-            return
-        if image_meta.get('disk_format') not in ['raw', 'iso']:
-            reason = _('Image is not raw format')
-            raise exception.ImageUnacceptable(image_id=image_id, reason=reason)
-        if not self._supports_layering():
-            reason = _('installed version of librbd does not support cloning')
-            raise exception.ImageUnacceptable(image_id=image_id, reason=reason)
-
-        for location in image_locations:
-            url = location['url']
-            if self._is_cloneable(url):
-                prefix, pool, image, snapshot = self._parse_location(url)
-                return self._clone(pool, image, snapshot)
-
-        reason = _('No image locations are accessible')
-        raise exception.ImageUnacceptable(image_id=image_id, reason=reason)
 
 
 class Backend(object):
@@ -823,7 +538,7 @@ class Backend(object):
 
     def backend(self, image_type=None):
         if not image_type:
-            image_type = CONF.libvirt_images_type
+            image_type = CONF.libvirt.images_type
         image = self.BACKEND.get(image_type)
         if not image:
             raise RuntimeError(_('Unknown image_type=%s') % image_type)
@@ -835,17 +550,16 @@ class Backend(object):
         :instance: Instance name.
         :name: Image name.
         :image_type: Image type.
-        Optional, is CONF.libvirt_images_type by default.
+        Optional, is CONF.libvirt.images_type by default.
         """
         backend = self.backend(image_type)
         return backend(instance=instance, disk_name=disk_name)
 
-    def snapshot(self, disk_path, snapshot_name, image_type=None):
+    def snapshot(self, disk_path, image_type=None):
         """Returns snapshot for given image
 
         :path: path to image
-        :snapshot_name: snapshot name
         :image_type: type of image
         """
         backend = self.backend(image_type)
-        return backend(path=disk_path, snapshot_name=snapshot_name)
+        return backend(path=disk_path)
