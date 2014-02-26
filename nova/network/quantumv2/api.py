@@ -363,12 +363,13 @@ class API(base.Base):
             key = (instance['uuid'], port['mac_address'])
             try:
                 if vm_info.get(key, False):
-                    cmd = "%s %s %s %s %s %s %s" % \
+                    cmd = "%s %s %s %s %s %s %s %s" % \
                     (csfp, "down",
                     vm_info[key].vm_name,
                     vm_info[key].vm_mac,
                     vm_info[key].segmentation_id,
-                    fwd_mode, gw_mac)
+                    fwd_mode, gw_mac,
+                    instance['uuid'].replace("-", ""))
                     output_c = subp.check_output(cmd, shell=True)
                     del (vm_info[key])
                 quantumv2.get_client(context).delete_port(port['id'])
@@ -942,13 +943,14 @@ class API(base.Base):
                                        }
                                     }
                     client.update_port(port['id'], port_req_body)
-                    cmd = "%s %s %s %s %s %s %s %s" % \
+                    cmd = "%s %s %s %s %s %s %s %s %s" % \
                           (csfp, "up",
                            vm_info[key].vm_name,
                            vm_info[key].vm_mac,
                            vm_info[key].vm_ip,
                            vm_info[key].segmentation_id,
-                           fwd_mode, gw_mac)
+                           fwd_mode, gw_mac,
+                           instance['uuid'].replace("-", ""))
                     output_c = subp.check_output(cmd, shell = True)
                 elif (instance['task_state'] == None or \
                       instance['task_state'] == "migrating"):
@@ -959,34 +961,37 @@ class API(base.Base):
                                   port['mac_address'],
                                   port['fixed_ips'][0]['ip_address'],
  str(client.show_network(network['id'])['network']['provider:segmentation_id']))
-                        cmd = "%s %s %s %s %s %s %s %s" % \
+                        cmd = "%s %s %s %s %s %s %s %s %s" % \
                               (csfp, "up",
                                vm_info[key].vm_name,
                                vm_info[key].vm_mac,
                                vm_ip,
                                vm_info[key].segmentation_id,
-                               fwd_mode, gw_mac)
+                               fwd_mode, gw_mac,
+                               instance['uuid'].replace("-", ""))
                         output_c = subp.check_output(cmd, shell = True)
             elif (instance['task_state'] == "migrating"):
                     if (instance['host'] == platform.node()):
                         #means I'm migrating out
-                        cmd = "%s %s %s %s %s %s %s" % \
+                        cmd = "%s %s %s %s %s %s %s %s" % \
                               (csfp, "down",
                                vm_info[key].vm_name,
                                vm_info[key].vm_mac,
                                vm_info[key].segmentation_id,
-                               fwd_mode, gw_mac)
+                               fwd_mode, gw_mac,
+                               instance['uuid'].replace("-", ""))
                         output_c = subp.check_output(cmd, shell = True)
                         del (vm_info[key])
             elif vmstate == 'active':
                 vm_ip = port['dfa_vm_ip']
-                cmd = "%s %s %s %s %s %s %s %s" % \
+                cmd = "%s %s %s %s %s %s %s %s %s" % \
                       (csfp, "up",
                        vm_info[key].vm_name,
                        vm_info[key].vm_mac,
                        vm_ip,
                        vm_info[key].segmentation_id,
-                       fwd_mode, gw_mac)
+                       fwd_mode, gw_mac,
+                       instance['uuid'].replace("-", ""))
                 output_c = subp.check_output(cmd, shell = True)
 
             nw_info.append(network_model.VIF(
