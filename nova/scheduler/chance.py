@@ -106,3 +106,4 @@ class ChanceScheduler(driver.Scheduler):
                 #             error properly
                 driver.handle_schedule_error(context, ex, instance_uuid,
                                              request_spec)
+
