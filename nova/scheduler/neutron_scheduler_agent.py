@@ -11,13 +11,12 @@ class NeutronScheduler(messaging.RPCClient):
         target = messaging.Target(topic='filter_scheduler', version='3.0')
         super(NeutronScheduler, self).__init__(transport, target)
 
-    def neutron_scheduler(self, hosts, chain_id, weights, router_id=None):
+    def neutron_scheduler(self, hosts, chain_name, weights, resource):
         """Make a remote process call to retrieve the sync
         data for routers."""
-        resource = [router_id]
         cctxt = self.prepare()
         return cctxt.call('neutron_filter_scheduler',
                                                resource=resource,
                                                hosts=hosts,
-                                               chain_id=chain_id,
+                                               chain_name=chain_name,
                                                weight_functions = weights)
