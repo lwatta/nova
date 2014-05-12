@@ -10,6 +10,6 @@ class NeutronFilter(filters.BaseHostFilter):
 
         chain_name = 'all_filter'
         weights = None
-        resource = filter_properties
-
-        return NeutronScheduler.neutron_scheduler(filter_obj_list, chain_name, weights, resource)
+        instance = filter_properties
+        ns = NeutronScheduler()
+        return ns.neutron_scheduler(filter_obj_list, chain_name, weights, instance)
