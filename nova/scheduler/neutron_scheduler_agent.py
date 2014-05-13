@@ -23,9 +23,8 @@ class NeutronScheduler(object):
             i_dict.pop('service')
             self.host_dict.append(i_dict)
 
-
         return client.call(context, 'neutron_filter_scheduler',
-                           resource=jsonutils.to_primitive(instance),
+                           instance=jsonutils.to_primitive(instance),
                            hosts=jsonutils.to_primitive(self.host_dict),
                            chain_name=chain_name,
                            weight_functions=weights)
