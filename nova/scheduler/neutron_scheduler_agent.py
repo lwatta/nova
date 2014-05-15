@@ -3,7 +3,7 @@ __author__ = 'nalle'
 from oslo import messaging
 from nova.openstack.common import jsonutils
 from nova import rpc
-
+import copy
 
 class NeutronScheduler(object):
     def __init__(self):
@@ -16,12 +16,12 @@ class NeutronScheduler(object):
         """Make a remote process call to use Neutron's filter scheduler."""
         client = self.client.prepare()
         context = instance.pop('context')
+        new_hosts = copy.deepcopy(hosts)
 
-        for i in hosts:
-            i_dict = i.__dict__
-            i_dict.pop('updated')
-            i_dict.pop('service')
-            self.host_dict.append(i_dict)
+        for i in new_hosts:
+            i.__dict__.pop('updated')
+            i.__dict__.pop('service')
+            self.host_dict.append(i.__dict__)
 
         return client.call(context, 'neutron_filter_scheduler',
                            instance=jsonutils.to_primitive(instance),
