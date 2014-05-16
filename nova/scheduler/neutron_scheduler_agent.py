@@ -4,12 +4,15 @@ from oslo import messaging
 from nova.openstack.common import jsonutils
 from nova import rpc
 import copy
+from nova.objects import base as objects_base
 
 class NeutronScheduler(object):
-    def __init__(self):
+    def __init__(self, topic):
         super(NeutronScheduler, self).__init__()
-        target = messaging.Target(topic='topic.filter_scheduler', version='3.0')
-        self.client = rpc.get_client(target)
+        self.topic = topic
+        target = messaging.Target(topic=self.topic, version='1.0')
+        serializer = objects_base.NovaObjectSerializer()
+        self.client = rpc.get_client(target, serializer=serializer)
         self.host_dict = []
 
     def neutron_scheduler(self, hosts, chain_name, weights, instance):
