@@ -10,7 +10,7 @@ class NeutronScheduler(object):
     def __init__(self, topic):
         super(NeutronScheduler, self).__init__()
         self.topic = topic
-        target = messaging.Target(topic=self.topic, version='1.0')
+        target = messaging.Target(topic=self.topic, version='1.0', exchange='nova')
         serializer = objects_base.NovaObjectSerializer()
         self.client = rpc.get_client(target, serializer=serializer)
         self.host_dict = []
