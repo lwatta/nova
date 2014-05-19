@@ -10,7 +10,7 @@ class HostS(HostState):
         self.__dict__.update(adict)
 
 def to_object(adict):
-    return Hosts(adict)
+    return HostS(adict)
 
 
 class NeutronFilter(filters.BaseHostFilter):
