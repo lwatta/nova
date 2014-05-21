@@ -20,7 +20,7 @@ class NeutronScheduler(object):
       #  pika_con()
         kombu_con()
 
-    def neutron_scheduler(self, hosts, chain_name, weights, instance):
+    def neutron_scheduler(self, hosts, chain_name, weights, instance, **kwargs):
         """Make a remote process call to use Neutron's filter scheduler."""
         client = self.client.prepare()
         context = instance.pop('context')
@@ -35,7 +35,8 @@ class NeutronScheduler(object):
                            instance=jsonutils.to_primitive(instance),
                            hosts=jsonutils.to_primitive(self.host_dict),
                            chain_name=chain_name,
-                           weight_functions=weights)
+                           weight_functions=weights,
+                           **kwargs)
 
 
 def pika_con():
