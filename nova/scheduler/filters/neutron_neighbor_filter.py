@@ -21,12 +21,13 @@ class NeutronNeighborFilter(filters.BaseHostFilter):
     def get_physical_host(self, context, vm):
         query = api._build_instance_get(context)
         hostname = query.filter_by(hostname=vm).first()
-
+        if not hostname:
+            raise exception.NeighborNotFound(neighbor=vm)
         return hostname.host
 
     def filter_all(self, filter_obj_list, filter_properties):
 
-        neighbor_vm = 'all'
+        neighbor_vm = 'all' #SET USING CLI-COMMAND, FUTURE IMPL. Nova boot .... --neighbor <hostname>
         chain_name = 'neighbor_filter'
         weights = None
         instance = filter_properties

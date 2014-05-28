@@ -1520,3 +1520,7 @@ class RequestedVRamTooHigh(NovaException):
 
 class InvalidWatchdogAction(Invalid):
     msg_fmt = _("Provided watchdog action (%(action)s) is not supported.")
+
+
+class NeighborNotFound(NotFound):
+    msg_fmt = _("Neighbor (vm) %(neighbor)s could not be found.")
