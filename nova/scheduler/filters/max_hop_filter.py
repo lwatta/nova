@@ -16,7 +16,7 @@ def to_object(adict):
     return HostS(adict)
 
 
-class NeutronNeighborFilter(filters.BaseHostFilter):
+class NeutronMaxHopFilter(filters.BaseHostFilter):
 
     def get_physical_host(self, context, vm):
         query = api._build_instance_get(context)
@@ -28,14 +28,15 @@ class NeutronNeighborFilter(filters.BaseHostFilter):
     def filter_all(self, filter_obj_list, filter_properties):
 
         neighbor_vm = 'all' #SET USING CLI-COMMAND, FUTURE IMPL. Nova boot .... --neighbor <hostname>
-        chain_name = 'neighbor_filter'
+        chain_name = 'max_hop_filter'
         weights = None
         instance = filter_properties
         topic = 'topic.filter_scheduler'
         ns = NeutronScheduler(topic)
-        physical_host = self.get_physical_host(instance.get('context'), neighbor_vm)
+        #physical_host = self.get_physical_host(instance.get('context'), neighbor_vm)
         kwargs = {
-        'neighbor_physical_host': physical_host}
+        'neighbor_physical_host': 'nalleCisco',
+        'no_hops': 2}
         hosts = ns.neutron_scheduler(filter_obj_list, chain_name, weights, instance, **kwargs)
 
         if hosts == 'No valid host':
