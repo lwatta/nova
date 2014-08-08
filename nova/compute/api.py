@@ -1272,20 +1272,37 @@ class API(base.Base):
 
 
     #NOTE(schoksey): polling hack for now as volumes take longer to get "available"
-    def _await_block_device_map_available(self, context, vol_id, max_tries=30,
-                                        wait_between=2):
-        attempts = 0
-        start = time.time()
-        while attempts < max_tries:
-            volume = self.volume_api.get(context, vol_id)
-            volume_status = volume['status']
-            if volume_status == 'available':
-                return attempts + 1
-            else:
-                LOG.warn(_("Volume id: %s finished being created but was"
+    #def _await_block_device_map_available(self, context, vol_id, max_tries=30,
+    #                                    wait_between=2):
+    #    attempts = 0
+    #    start = time.time()
+    #    while attempts < max_tries:
+    #        volume = self.volume_api.get(context, vol_id)
+    #        volume_status = volume['status']
+    #        if volume_status == 'available':
+    #            return attempts + 1
+    #        else:
+    #            LOG.warn(_("Volume id: %s finished being created but was"
+    #                           " not set as 'available'"), vol_id)
+    #            greenthread.sleep(wait_between)
+    #            attempts += 1
+
+
+
+    #NOTE(schoksey): polling hack for now as volumes take longer to get "available"
+    def _await_block_device_map_available(self, context, vol_id, max_duration=90,
+					backoff_interval=5):
+	retry_time = 0
+	while True:
+	    volume = self.volume_api.get(context, vol_id)
+	    if volume['status'] in ['available', 'error']:
+		break
+	    if retry_time < max_duration:
+	        retry_time += backoff_interval
+	        LOG.warn(_("Volume id: %s finished being created but was"
                                " not set as 'available'"), vol_id)
-                greenthread.sleep(wait_between)
-                attempts += 1
+                greenthread.sleep(retry_time)
+
 
 
     def trigger_provider_fw_rules_refresh(self, context):
