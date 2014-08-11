@@ -25,6 +25,7 @@ import base64
 import functools
 import re
 import string
+import time
 import uuid
 
 from oslo.config import cfg
@@ -72,6 +73,9 @@ from nova.scheduler import rpcapi as scheduler_rpcapi
 from nova import servicegroup
 from nova import utils
 from nova import volume
+
+# NOTE:(schoksey): added for polling
+from eventlet import greenthread
 
 LOG = logging.getLogger(__name__)
 
@@ -1201,6 +1205,43 @@ class API(base.Base):
         Returns a tuple of (instances, reservation_id)
         """
 
+        # NOTE:(schoksey): If external storage based flavor and block device
+        # mapping is empty; create a bootable volume;
+        volume_size_gb = 1024*1024*1024
+        if not self._vda_exists_in_bdm(block_device_mapping)  \
+        and not self._is_local_storage_instance(instance_type)  \
+        and image_href:
+            image_detail = self._get_image(context, image_href)
+            volume_size = instance_type['root_gb'] or image_detail[1]['size']/volume_size_gb
+            root_volume = self.volume_api.create(context=context,
+                                   size=volume_size,
+                                   name=display_name,
+                                   description=None,
+                                   image_id=image_detail[1]['id'])
+            # Note: the above causes a TypeError on the EC2 API
+            # because it doesn't accept an image_id.  Handle that
+            # here.  This is basically only necessary to get tests
+            # to pass and isn't an issue in the real workd (as far
+            # as I can tell...this has been in production for months
+            # without the except here).  We could put a try/except
+            # in to catch that, but those tests will end up failing
+            # further on anyway.  It also breaks a lot of tests
+            # because in tox, the endpoint isn't found (this would
+            # not be the case in the real world if the cloud is
+            # functioning normally).
+            root_bdm = {'device_name': 'vda',
+                                     'delete_on_termination': True,
+                                     'volume_id': root_volume['id'],
+                                     'volume_size': volume_size}
+                                     #'volume_size': instance_type['root_gb']}
+
+            # NOTE:(schoksey): adding logic to wait until bdm is in
+            # "available" state
+            self._await_block_device_map_available(context, root_volume['id'])
+            block_device_mapping.append(root_bdm)
+
+        LOG.debug("(schoksey): block device mapping in create VM: %s", block_device_mapping)
+
         self._check_create_policies(context, availability_zone,
                 requested_networks, block_device_mapping)
 
@@ -1220,6 +1261,52 @@ class API(base.Base):
                                block_device_mapping, auto_disk_config,
                                scheduler_hints=scheduler_hints,
                                legacy_bdm=legacy_bdm)
+
+
+    # NOTE:(schoksey): Check if flavor is local storage type
+    def _is_local_storage_instance(self, instance_type):
+        if any('extra_specs' in es for es in instance_type):
+            extra_specs = instance_type['extra_specs']
+            if 'local_storage' in extra_specs and extra_specs['local_storage'].lower() == 'true':
+                return True
+            else:
+                return False
+        else:
+            return False
+
+
+    # NOTE:(schoksey): Check if "vda" device name exists in
+    # block_device_mapping
+    def _vda_exists_in_bdm(self, block_device_mapping):
+        # NOTE:(mvoelker): added a catch for None here
+        # as otherwise a lot of tests will fail.
+        if (block_device_mapping is None):
+            return False
+        if not any(block_device_mapping):
+            return False
+        else:
+            for block_device in block_device_mapping:
+                if block_device['device_name'] == 'vda':
+                    return True
+            return False;
+
+
+    # NOTE(schoksey): polling hack for now as volumes take longer to get
+    # "available"
+    def _await_block_device_map_available(self, context, vol_id, max_tries=30,
+                                        wait_between=2):
+        attempts = 0
+        start = time.time()
+        while attempts < max_tries:
+            volume = self.volume_api.get(context, vol_id)
+            volume_status = volume['status']
+            if volume_status == 'available':
+                return attempts + 1
+            else:
+                LOG.warn(_("Volume id: %s finished being created but was"
+                               " not set as 'available'"), vol_id)
+                greenthread.sleep(wait_between)
+                attempts += 1
 
     def trigger_provider_fw_rules_refresh(self, context):
         """Called when a rule is added/removed from a provider firewall."""
