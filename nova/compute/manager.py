@@ -679,13 +679,24 @@ class ComputeManager(manager.Manager):
         While nova-compute was down, the instances running on it could be
         evacuated to another host. Check that the instances reported
         by the driver are still associated with this host.  If they are
-        not, destroy them.
+        not, destroy them, with the exception of instances which are in
+        the MIGRATING state.
         """
         our_host = self.host
         filters = {'deleted': False}
         local_instances = self._get_instances_on_driver(context, filters)
         for instance in local_instances:
             if instance.host != our_host:
+                if instance.task_state in [task_states.MIGRATING]:
+                    LOG.debug('Will not delete instance as its host ('
+                              '%(instance_host)s) is not equal to our '
+                              'host (%(our_host)s) but its state is '
+                              '(%(task_state)s)',
+                              {'instance_host': instance.host,
+                               'our_host': our_host,
+                               'task_state': instance.task_state},
+                              instance=instance)
+                    continue
                 LOG.info(_('Deleting instance as its host ('
                            '%(instance_host)s) is not equal to our '
                            'host (%(our_host)s).'),
@@ -979,7 +990,7 @@ class ComputeManager(manager.Manager):
         LOG.info(_("Lifecycle event %(state)d on VM %(uuid)s") %
                   {'state': event.get_transition(),
                    'uuid': event.get_instance_uuid()})
-        context = nova.context.get_admin_context()
+        context = nova.context.get_admin_context(read_deleted='yes')
         instance = instance_obj.Instance.get_by_uuid(
             context, event.get_instance_uuid())
         vm_power_state = None
@@ -5230,7 +5241,9 @@ class ComputeManager(manager.Manager):
         for db_instance in db_instances:
             if db_instance['task_state'] is not None:
                 LOG.info(_("During sync_power_state the instance has a "
-                           "pending task. Skip."), instance=db_instance)
+                           "pending task (%(task)s). Skip."),
+                         {'task': db_instance['task_state']},
+                         instance=db_instance)
                 continue
             # No pending tasks. Now try to figure out the real vm_power_state.
             try:
@@ -5291,7 +5304,9 @@ class ComputeManager(manager.Manager):
             # yet. In this case, let's allow the loop to continue
             # and run the state sync in a later round
             LOG.info(_("During sync_power_state the instance has a "
-                       "pending task. Skip."), instance=db_instance)
+                       "pending task (%(task)s). Skip."),
+                     {'task': db_instance.task_state},
+                     instance=db_instance)
             return
 
         if vm_power_state != db_power_state:
