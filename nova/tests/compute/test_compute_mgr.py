@@ -1161,13 +1161,13 @@ class ComputeManagerUnitTestCase(test.NoDBTestCase):
             mock.patch.object(self.compute, '_get_instance_nw_info',
                                return_value=None),
             mock.patch.object(self.compute,
-                              '_get_instance_volume_block_device_info',
+                              '_get_instance_block_device_info',
                                return_value={}),
             mock.patch.object(self.compute, '_is_instance_storage_shared',
                                return_value=False),
             mock.patch.object(self.compute.driver, 'destroy')
         ) as (_get_instances_on_driver, _get_instance_nw_info,
-              _get_instance_volume_block_device_info,
+              _get_instance_block_device_info,
               _is_instance_storage_shared, destroy):
             self.compute._destroy_evacuated_instances(self.context)
             destroy.assert_called_once_with(self.context, instance_2, None,
