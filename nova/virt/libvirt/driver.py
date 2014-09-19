@@ -102,6 +102,7 @@ from nova.virt.libvirt import config as vconfig
 from nova.virt.libvirt import firewall as libvirt_firewall
 from nova.virt.libvirt import imagebackend
 from nova.virt.libvirt import imagecache
+from nova.virt.libvirt import rbd_utils
 from nova.virt.libvirt import utils as libvirt_utils
 from nova.virt import netutils
 from nova.virt import watchdog_actions
@@ -2639,7 +2640,17 @@ class LibvirtDriver(driver.ComputeDriver):
             if size == 0 or suffix == '.rescue':
                 size = None
 
-            image('disk').cache(fetch_func=libvirt_utils.fetch_image,
+            backend = image('disk')
+            if backend.SUPPORTS_CLONE:
+                def clone_fallback_to_fetch(*args, **kwargs):
+                    try:
+                        backend.clone(context, disk_images['image_id'])
+                    except exception.ImageUnacceptable:
+                        libvirt_utils.fetch_image(*args, **kwargs)
+                fetch_func = clone_fallback_to_fetch
+            else:
+                fetch_func = libvirt_utils.fetch_image
+            backend.cache(fetch_func=libvirt_utils.fetch_image,
                                 context=context,
                                 filename=root_fname,
                                 size=size,

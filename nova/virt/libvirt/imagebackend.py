@@ -22,6 +22,7 @@ import six
 from oslo.config import cfg
 
 from nova import exception
+from nova import image
 from nova.openstack.common import excutils
 from nova.openstack.common import fileutils
 from nova.openstack.common.gettextutils import _
@@ -33,6 +34,7 @@ from nova.virt.disk import api as disk
 from nova.virt import images
 from nova.virt.libvirt import config as vconfig
 from nova.virt.libvirt import utils as libvirt_utils
+from nova.virt.libvirt import rbd_utils
 
 
 try:
@@ -87,10 +89,13 @@ CONF.import_opt('image_cache_subdirectory_name', 'nova.virt.imagecache')
 CONF.import_opt('preallocate_images', 'nova.virt.driver')
 
 LOG = logging.getLogger(__name__)
+IMAGE_API = image.API()
 
 
 @six.add_metaclass(abc.ABCMeta)
 class Image(object):
+
+    SUPPORTS_CLONE = False
 
     def __init__(self, source_type, driver_format, is_block_dev=False):
         """Image initialization.
@@ -212,8 +217,7 @@ class Image(object):
                                            'path': self.path})
         return can_fallocate
 
-    @staticmethod
-    def verify_base_size(base, size, base_size=0):
+    def verify_base_size(self, base, size, base_size=0):
         """Check that the base image is not larger than size.
            Since images can't be generally shrunk, enforce this
            constraint taking account of virtual image size.
@@ -232,7 +236,7 @@ class Image(object):
             return
 
         if size and not base_size:
-            base_size = disk.get_disk_size(base)
+            base_size = self.get_disk_size(base)
 
         if size < base_size:
             msg = _('%(base)s virtual size %(base_size)s '
@@ -241,6 +245,9 @@ class Image(object):
                               'base_size': base_size,
                               'size': size})
             raise exception.FlavorDiskTooSmall()
+
+    def get_disk_size(self, name):
+        disk.get_disk_size(name)
 
     def snapshot_extract(self, target, out_format):
         raise NotImplementedError()
@@ -303,6 +310,21 @@ class Image(object):
         except OSError as e:
             raise exception.DiskInfoReadWriteFail(reason=unicode(e))
         return driver_format
+
+    def clone(self, context, image_id_or_uri):
+        """Clone an image.
+
+        Note that clone operation is backend-dependent. The backend may ask
+        the image API for a list of image "locations" and select one or more
+        of those locations to clone an image from.
+
+        :param image_id_or_uri: The ID or URI of an image to clone.
+
+        :raises: exception.ImageUnacceptable if it cannot be cloned
+        """
+        reason = _('clone() is not implemented')
+        raise exception.ImageUnacceptable(image_id=image_id_or_uri,
+                                            reason=reason)
 
 
 class Raw(Image):
@@ -537,6 +559,9 @@ def ascii_str(s):
 
 
 class Rbd(Image):
+
+    SUPPORTS_CLONE = True
+
     def __init__(self, instance=None, disk_name=None, path=None, **kwargs):
         super(Rbd, self).__init__("block", "rbd", is_block_dev=True)
         if path:
@@ -622,7 +647,7 @@ class Rbd(Image):
         info = vconfig.LibvirtConfigGuestDisk()
 
         hosts, ports = self._get_mon_addrs()
-        info.device_type = device_type
+        info.source_type = device_type
         info.driver_format = 'raw'
         info.driver_cache = cache_mode
         info.target_bus = disk_bus
@@ -658,30 +683,58 @@ class Rbd(Image):
         with RBDVolumeProxy(self, volume_name) as vol:
             vol.resize(int(size))
 
+    def get_disk_size(self, name):
+        """Returns the size of the virtual disk in bytes.
+
+        The name argument is ignored since this backend already knows
+        its name, and callers may pass a non-existent local file path.
+        """
+        return self.size(self.rbd_name)
+
     def create_image(self, prepare_template, base, size, *args, **kwargs):
         if self.rbd is None:
             raise RuntimeError(_('rbd python libraries not found'))
 
-        if not os.path.exists(base):
+        if not self.check_image_exists():
             prepare_template(target=base, max_size=size, *args, **kwargs)
         else:
             self.verify_base_size(base, size)
 
-        # keep using the command line import instead of librbd since it
-        # detects zeroes to preserve sparseness in the image
-        args = ['--pool', self.pool, base, self.rbd_name]
-        if self._supports_layering():
-            args += ['--new-format']
-        args += self._ceph_args()
-        libvirt_utils.import_rbd_image(*args)
+        # prepare_template() may have cloned the image into a new rbd
+        # image already instead of downloading it locally
+        if not self.check_image_exists():
+            self.import_image(base, self.rbd_name)
 
-        base_size = disk.get_disk_size(base)
-
-        if size and size > base_size:
+        if size and size > self.get_disk_size(self.rbd_name):
             self._resize(self.rbd_name, size)
 
     def snapshot_extract(self, target, out_format):
         images.convert_image(self.path, target, out_format)
+
+    def clone(self, context, image_id_or_uri):
+        if not self.supports_layering():
+            reason = _('installed version of librbd does not support cloning')
+            raise exception.ImageUnacceptable(image_id=image_id_or_uri,
+                                                reason=reason)
+
+        image_meta = IMAGE_API.get(context, image_id_or_uri,
+                                    include_locations=True)
+        locations = image_meta['locations']
+
+        LOG.debug('Image locations are: %(locs)s' % {'locs': locations})
+
+        if image_meta.get('disk_format') not in ['raw', 'iso']:
+            reason = _('Image is not raw format')
+            raise exception.ImageUnacceptable(image_id=image_id_or_uri,
+                                              reason=reason)
+
+        for location in locations:
+            if self.is_cloneable(location, image_meta):
+                return self.clone(location, self.rbd_name)
+
+        reason = _('No image locations are accessible')
+        raise exception.ImageUnacceptable(image_id=image_id_or_uri,
+                                          reason=reason)
 
 
 class Backend(object):
