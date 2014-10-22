@@ -308,44 +308,6 @@ class Image(object):
         reason = _('direct_fetch() is not implemented')
         raise exception.ImageUnacceptable(image_id=image_id, reason=reason)
 
-    def direct_snapshot(self, snapshot_name, image_format, image_id):
-        """Prepare a snapshot for direct reference from glance
-
-        :raises: exception.ImageUnacceptable if it cannot be
-                 referenced directly in the specified image format
-        :returns: URL to be given to glance
-        """
-        reason = _('direct_snapshot() is not implemented')
-        raise exception.ImageUnacceptable(image_id=image_id, reason=reason)
-
-    def direct_fetch(self, image_id, image_meta, image_locations):
-        """Create an image from a direct image location.
-
-        :raises: exception.ImageUnacceptable if it cannot be fetched directly
-        """
-        reason = _('direct_fetch() is not implemented')
-        raise exception.ImageUnacceptable(image_id=image_id, reason=reason)
-
-    def direct_snapshot(self, snapshot_name, image_format, image_id):
-        """Prepare a snapshot for direct reference from glance
-
-        :raises: exception.ImageUnacceptable if it cannot be
-                 referenced directly in the specified image format
-        :returns: URL to be given to glance
-        """
-        reason = _('direct_snapshot() is not implemented')
-        raise exception.ImageUnacceptable(image_id=image_id, reason=reason)
-
-    def direct_snapshot(self, snapshot_name, image_format, image_id):
-        """Prepare a snapshot for direct reference from glance
-
-        :raises: exception.ImageUnacceptable if it cannot be
-                 referenced directly in the specified image format
-        :returns: URL to be given to glance
-        """
-        reason = _('direct_snapshot() is not implemented')
-        raise exception.ImageUnacceptable(image_id=image_id, reason=reason)
-
 
 class Raw(Image):
     def __init__(self, instance=None, disk_name=None, path=None):
@@ -575,68 +537,6 @@ class RADOSClient(object):
         self.driver._disconnect_from_rados(self.cluster, self.ioctx)
 
 
-def ascii_str(s):
-    """Convert a string to ascii, or return None if the input is None.
-
-    This is useful when a parameter is None by default, or a string. LibRBD
-    only accepts ascii, hence the need for conversion.
-    """
-    if s is None:
-        return s
-    return str(s)
-
-
-class RBDVolumeProxy(object):
-    """Context manager for dealing with an existing rbd volume.
-
-    This handles connecting to rados and opening an ioctx automatically, and
-    otherwise acts like a librbd Image object.
-
-    The underlying librados client and ioctx can be accessed as the attributes
-    'client' and 'ioctx'.
-    """
-    def __init__(self, driver, name, pool=None, snapshot=None,
-                 read_only=False):
-        client, ioctx = driver._connect_to_rados(pool)
-        try:
-            self.volume = driver.rbd.Image(ioctx, str(name),
-                                           snapshot=libvirt_utils.ascii_str(
-                                                        snapshot),
-                                           read_only=read_only)
-        except driver.rbd.Error:
-            LOG.exception(_("error opening rbd image %s"), name)
-            driver._disconnect_from_rados(client, ioctx)
-            raise
-        self.driver = driver
-        self.client = client
-        self.ioctx = ioctx
-
-    def __enter__(self):
-        return self
-
-    def __exit__(self, type_, value, traceback):
-        try:
-            self.volume.close()
-        finally:
-            self.driver._disconnect_from_rados(self.client, self.ioctx)
-
-    def __getattr__(self, attrib):
-        return getattr(self.volume, attrib)
-
-
-class RADOSClient(object):
-    """Context manager to simplify error handling for connecting to ceph."""
-    def __init__(self, driver, pool=None):
-        self.driver = driver
-        self.cluster, self.ioctx = driver._connect_to_rados(pool)
-
-    def __enter__(self):
-        return self
-
-    def __exit__(self, type_, value, traceback):
-        self.driver._disconnect_from_rados(self.cluster, self.ioctx)
-
-
 class Rbd(Image):
     def __init__(self, instance=None, disk_name=None, path=None,
                  snapshot_name=None, **kwargs):
@@ -711,7 +611,7 @@ class Rbd(Image):
         return hosts, ports
 
     def libvirt_info(self, disk_bus, disk_dev, device_type, cache_mode,
-                     extra_specs, hypervisor_version):
+            extra_specs, hypervisor_version):
         """Get `LibvirtConfigGuestDisk` filled for this image.
 
         :disk_dev: Disk bus device name
@@ -754,14 +654,6 @@ class Rbd(Image):
                 return True
 
         return False
-
-    def _resize(self, size):
-        with RBDVolumeProxy(self, self.rbd_name) as vol:
-            vol.resize(int(size))
-
-    def _size(self):
-        with RBDVolumeProxy(self, self.rbd_name) as vol:
-            return vol.size()
 
     def _resize(self, size):
         with RBDVolumeProxy(self, self.rbd_name) as vol:
@@ -850,127 +742,14 @@ class Rbd(Image):
                       dict(loc=image_location, err=e))
             return False
 
-    def _clone(self, pool, image, snapshot, clone_name):
+    def _clone(self, pool, image, snapshot):
         with RADOSClient(self, str(pool)) as src_client:
             with RADOSClient(self) as dest_client:
                 self.rbd.RBD().clone(src_client.ioctx,
                                      str(image),
                                      str(snapshot),
                                      dest_client.ioctx,
-                                     clone_name,
-                                     features=self.rbd.RBD_FEATURE_LAYERING)
-
-    def direct_fetch(self, image_id, image_meta, image_locations):
-        if self.check_image_exists():
-            return
-        if image_meta.get('disk_format') not in ['raw', 'iso']:
-            reason = _('Image is not raw format')
-            raise exception.ImageUnacceptable(image_id=image_id, reason=reason)
-        if not self._supports_layering():
-            reason = _('installed version of librbd does not support cloning')
-            raise exception.ImageUnacceptable(image_id=image_id, reason=reason)
-
-        for location in image_locations:
-            url = location['url']
-            if self._is_cloneable(url):
-                prefix, pool, image, snapshot = self._parse_location(url)
-                return self._clone(pool, image, snapshot, self.rbd_name)
-
-        reason = _('No image locations are accessible')
-        raise exception.ImageUnacceptable(image_id=image_id, reason=reason)
-
-    def _create_snapshot(self, name, snap_name):
-        """Creates an rbd snapshot."""
-        with RBDVolumeProxy(self, name) as volume:
-            snap = snap_name.encode('utf-8')
-            volume.create_snap(snap)
-            if self._supports_layering():
-                volume.protect_snap(snap)
-
-    def _delete_snapshot(self, name, snap_name):
-        """Deletes an rbd snapshot."""
-        # NOTE(dosaboy): this was broken by commit cbe1d5f. Ensure names are
-        #                utf-8 otherwise librbd will barf.
-        snap = snap_name.encode('utf-8')
-        with RBDVolumeProxy(self, name) as volume:
-            if self._supports_layering():
-                try:
-                    volume.unprotect_snap(snap)
-                except rbd.ImageBusy:
-                    raise exception.SnapshotIsBusy(snapshot_name=snap)
-            volume.remove_snap(snap)
-
-    def direct_snapshot(self, snapshot_name, image_format, image_id):
-        deletion_marker = '_to_be_deleted_by_glance'
-        if image_format != 'raw':
-            reason = _('only raw format is supported')
-            raise exception.ImageUnacceptable(image_id=image_id, reason=reason)
-        if not self._supports_layering():
-            reason = _('librbd is too old')
-            raise exception.ImageUnacceptable(image_id=image_id, reason=reason)
-        rbd_snap_name = snapshot_name + deletion_marker
-        self._create_snapshot(self.rbd_name, rbd_snap_name)
-        clone_name = self.rbd_name + '_clone_' + snapshot_name
-        clone_snap = 'snap'
-        self._clone(self.pool, self.rbd_name, rbd_snap_name, clone_name)
-        self._create_snapshot(clone_name, clone_snap)
-        fsid = self._get_fsid()
-        return 'rbd://{fsid}/{pool}/{image}/{snap}'.format(
-            fsid=fsid,
-            pool=self.pool,
-            image=clone_name,
-            snap=clone_snap)
-
-    def _parse_location(self, location):
-        prefix = 'rbd://'
-        if not location.startswith(prefix):
-            reason = _('Not stored in rbd')
-            raise exception.ImageUnacceptable(image_id=location, reason=reason)
-        pieces = map(urllib.unquote, location[len(prefix):].split('/'))
-        if any(map(lambda p: p == '', pieces)):
-            reason = _('Blank components')
-            raise exception.ImageUnacceptable(image_id=location, reason=reason)
-        if len(pieces) != 4:
-            reason = _('Not an rbd snapshot')
-            raise exception.ImageUnacceptable(image_id=location, reason=reason)
-        return pieces
-
-    def _get_fsid(self):
-        with RADOSClient(self) as client:
-            return client.cluster.get_fsid()
-
-    def _is_cloneable(self, image_location):
-        try:
-            fsid, pool, image, snapshot = self._parse_location(image_location)
-        except exception.ImageUnacceptable as e:
-            LOG.debug(_('not cloneable: %s'), e)
-            return False
-
-        if self._get_fsid() != fsid:
-            reason = _('%s is in a different ceph cluster') % image_location
-            LOG.debug(reason)
-            return False
-
-        # check that we can read the image
-        try:
-            with RBDVolumeProxy(self, image,
-                                pool=pool,
-                                snapshot=snapshot,
-                                read_only=True):
-                return True
-        except self.rbd.Error as e:
-            LOG.debug(_('Unable to open image %(loc)s: %(err)s') %
-                      dict(loc=image_location, err=e))
-            return False
-
-    def _clone(self, pool, image, snapshot, clone_name):
-        with RADOSClient(self, str(pool)) as src_client:
-            with RADOSClient(self) as dest_client:
-                self.rbd.RBD().clone(src_client.ioctx,
-                                     str(image),
-                                     str(snapshot),
-                                     dest_client.ioctx,
-                                     clone_name,
+                                     self.rbd_name,
                                      features=self.rbd.RBD_FEATURE_LAYERING)
 
     def direct_fetch(self, image_id, image_meta, image_locations, max_size=0):
@@ -987,52 +766,10 @@ class Rbd(Image):
             url = location['url']
             if self._is_cloneable(url):
                 prefix, pool, image, snapshot = self._parse_location(url)
-                return self._clone(pool, image, snapshot, self.rbd_name)
+                return self._clone(pool, image, snapshot)
 
         reason = _('No image locations are accessible')
         raise exception.ImageUnacceptable(image_id=image_id, reason=reason)
-
-    def _create_snapshot(self, name, snap_name):
-        """Creates an rbd snapshot."""
-        with RBDVolumeProxy(self, name) as volume:
-            snap = snap_name.encode('utf-8')
-            volume.create_snap(snap)
-            if self._supports_layering():
-                volume.protect_snap(snap)
-
-    def _delete_snapshot(self, name, snap_name):
-        """Deletes an rbd snapshot."""
-        # NOTE(dosaboy): this was broken by commit cbe1d5f. Ensure names are
-        #                utf-8 otherwise librbd will barf.
-        snap = snap_name.encode('utf-8')
-        with RBDVolumeProxy(self, name) as volume:
-            if self._supports_layering():
-                try:
-                    volume.unprotect_snap(snap)
-                except rbd.ImageBusy:
-                    raise exception.SnapshotIsBusy(snapshot_name=snap)
-            volume.remove_snap(snap)
-
-    def direct_snapshot(self, snapshot_name, image_format, image_id):
-        deletion_marker = '_to_be_deleted_by_glance'
-        if image_format != 'raw':
-            reason = _('only raw format is supported')
-            raise exception.ImageUnacceptable(image_id=image_id, reason=reason)
-        if not self._supports_layering():
-            reason = _('librbd is too old')
-            raise exception.ImageUnacceptable(image_id=image_id, reason=reason)
-        rbd_snap_name = snapshot_name + deletion_marker
-        self._create_snapshot(self.rbd_name, rbd_snap_name)
-        clone_name = self.rbd_name + '_clone_' + snapshot_name
-        clone_snap = 'snap'
-        self._clone(self.pool, self.rbd_name, rbd_snap_name, clone_name)
-        self._create_snapshot(clone_name, clone_snap)
-        fsid = self._get_fsid()
-        return 'rbd://{fsid}/{pool}/{image}/{snap}'.format(
-            fsid=fsid,
-            pool=self.pool,
-            image=clone_name,
-            snap=clone_snap)
 
 
 class Backend(object):

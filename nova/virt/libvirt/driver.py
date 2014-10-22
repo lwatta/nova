@@ -1421,44 +1421,6 @@ class LibvirtDriver(driver.ComputeDriver):
                      instance=instance)
 
         update_task_state(task_state=task_states.IMAGE_PENDING_UPLOAD)
-
-        try:
-            url = snapshot_backend.direct_snapshot(snapshot_name,
-                                                   image_format,
-                                                   image_id)
-            metadata['location'] = url
-            try:
-                image_service.update(context,
-                                     image_href,
-                                     metadata)
-            except Exception as e:
-                LOG.debug('failed to update glance', exc_info=True)
-                reason = _('failed to update glance: %s') % e
-                raise exception.ImageUnacceptable(image_id=image_id,
-                                                  reason=reason)
-            update_task_state(task_state=task_states.IMAGE_UPLOADING,
-                     expected_state=task_states.IMAGE_PENDING_UPLOAD)
-            LOG.info(_("Snapshot image upload complete"),
-                         instance=instance)
-        except exception.ImageUnacceptable:
-            LOG.debug('direct snapshot failed', exc_info=True)
-            self._generic_snapshot(context, snapshot_name,
-                                   snapshot_backend,
-                                   disk_path,
-                                   live_snapshot,
-                                   virt_dom,
-                                   state,
-                                   image_format,
-                                   instance,
-                                   image_href,
-                                   metadata,
-                                   image_service,
-                                   update_task_state)
-
-    def _generic_snapshot(self, context, snapshot_name, snapshot_backend,
-                          disk_path, live_snapshot,  virt_dom, state,
-                          image_format, instance, image_href, metadata,
-                          image_service, update_task_state):
         snapshot_directory = CONF.libvirt_snapshots_directory
         fileutils.ensure_tree(snapshot_directory)
         with utils.tempdir(dir=snapshot_directory) as tmpdir:
@@ -3942,13 +3904,14 @@ class LibvirtDriver(driver.ComputeDriver):
         # if block migration, instances_paths should not be on shared storage.
         source = CONF.host
 
-        dest_check_data.update('is_shared_block_storage',
-                self._is_shared_block_storage(instance, dest_check_data))
-        dest_check_data.update('is_shared_instance_path',
-                self._is_shared_instance_path(dest_check_data))
+        dest_check_data.update({'is_shared_block_storage':
+                self._is_shared_block_storage(instance, dest_check_data)})
+        dest_check_data.update({'is_shared_instance_path':
+                self._is_shared_instance_path(dest_check_data)})
 
         if dest_check_data['block_migration']:
-            if dest_check_data['shared_block_storage']:
+            if (dest_check_data['is_shared_block_storage'] or
+                    dest_check_data['is_shared_instance_path']):
                 reason = _("Block migration can not be used "
                            "with shared storage.")
                 raise exception.InvalidLocalStorage(reason=reason, path=source)
@@ -3956,7 +3919,7 @@ class LibvirtDriver(driver.ComputeDriver):
                                     dest_check_data['disk_available_mb'],
                                     dest_check_data['disk_over_commit'])
 
-        elif not (dest_check_data['shared_block_storage'] or
+        elif not (dest_check_data['is_shared_block_storage'] or
                   dest_check_data['is_shared_instance_path']):
             reason = _("Live migration can not be used "
                        "without shared storage.")
@@ -3985,19 +3948,6 @@ class LibvirtDriver(driver.ComputeDriver):
     def _is_shared_instance_path(self, dest_check_data):
         return self._check_shared_storage_test_file(
                     dest_check_data["filename"])
-
-    def _is_shared_block_storage(self, instance, dest_check_data):
-        remote_image_backends = ('rbd',)
-        is_local_image = CONF.libvirt_images_type not in remote_image_backends
-
-        is_volume_backed = dest_check_data.get('is_volume_backed', False)
-        has_local_disks = bool(
-                jsonutils.loads(self.get_instance_disk_info(instance['name'])))
-
-        return (not is_local_image or (is_volume_backed and not has_local_disks))
-
-    def _is_shared_instance_path(self, dest_check_data):
-        return self._check_shared_storage_test_file(dest_check_data["filename"])
 
     def _assert_dest_node_has_enough_disk(self, context, instance,
                                              available_mb, disk_over_commit):
@@ -4247,8 +4197,8 @@ class LibvirtDriver(driver.ComputeDriver):
                            network_info, disk_info, migrate_data=None):
         """Preparation live migration."""
         # Steps for volume backed instance live migration w/o shared storage.
-        is_shared_block_storage = False
-        is_shared_instance_path = False
+        is_shared_block_storage = True
+        is_shared_instance_path = True
         is_volume_backed = False
         is_block_migration = True
         instance_relative_path = None
@@ -4275,7 +4225,7 @@ class LibvirtDriver(driver.ComputeDriver):
                 raise exception.DestinationDiskExists(path=instance_dir)
             os.mkdir(instance_dir)
 
-        if not (is_shared_block_storage or is_shared_instance_path):
+        if not is_shared_block_storage:
             # Ensure images and backing files are present.
             self._create_images_and_backing(context, instance, instance_dir,
                                             disk_info)
