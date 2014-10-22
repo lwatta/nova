@@ -52,6 +52,13 @@ except ImportError:
     rados = None
     rbd = None
 
+try:
+    import rados
+    import rbd
+except ImportError:
+    rados = None
+    rbd = None
+
 
 def execute(*args, **kwargs):
     return utils.execute(*args, **kwargs)
@@ -292,6 +299,33 @@ def _connect_to_rados(pool=None):
         raise
 
 
+def ascii_str(s):
+    """Convert a string to ascii, or return None if the input is None.
+
+    This is useful when a parameter is None by default, or a string. LibRBD
+    only accepts ascii, hence the need for conversion.
+    """
+    if s is None:
+        return s
+    return str(s)
+
+
+def _connect_to_rados(pool=None):
+    ceph_conf = ascii_str(CONF.libvirt_images_rbd_ceph_conf)
+    rbd_user = ascii_str(CONF.rbd_user)
+    client = rados.Rados(rados_id=rbd_user,
+                              conffile=ceph_conf)
+    try:
+        client.connect()
+        pool_to_open = str(pool)
+        ioctx = client.open_ioctx(pool_to_open)
+        return client, ioctx
+    except rados.Error:
+        # shutdown cannot raise an exception
+        client.shutdown()
+        raise
+
+
 def import_rbd_image(*args):
     execute('rbd', 'import', *args)
 
@@ -322,6 +356,14 @@ def remove_rbd_volumes(pool, *names):
 def get_rbd_pool_info(pool):
     client, ioctx = _connect_to_rados(pool)
     stats = client.get_cluster_stats()
+    return {'total': stats['kb'] * 1024,
+            'free': stats['kb_avail'] * 1024,
+            'used': stats['kb_used'] * 1024}
+
+
+def get_rbd_pool_info(pool):
+    client, ioctx = _connect_to_rados(pool)
+    stats = client.cluster.get_cluster_stats()
     return {'total': stats['kb'] * 1024,
             'free': stats['kb_avail'] * 1024,
             'used': stats['kb_used'] * 1024}
