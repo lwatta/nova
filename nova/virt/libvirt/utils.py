@@ -327,6 +327,30 @@ def get_rbd_pool_info(pool):
             'used': stats['kb_used'] * 1024}
 
 
+def get_rbd_pool_info(pool):
+    client, ioctx = _connect_to_rados(pool)
+    stats = client.cluster.get_cluster_stats()
+    return {'total': stats['kb'] * 1024,
+            'free': stats['kb_avail'] * 1024,
+            'used': stats['kb_used'] * 1024}
+
+
+def get_rbd_pool_info(pool):
+    client, ioctx = _connect_to_rados(pool)
+    stats = client.cluster.get_cluster_stats()
+    return {'total': stats['kb'] * 1024,
+            'free': stats['kb_avail'] * 1024,
+            'used': stats['kb_used'] * 1024}
+
+
+def get_rbd_pool_info(pool):
+    client, ioctx = _connect_to_rados(pool)
+    stats = client.cluster.get_cluster_stats()
+    return {'total': stats['kb'] * 1024,
+            'free': stats['kb_avail'] * 1024,
+            'used': stats['kb_used'] * 1024}
+
+
 def get_volume_group_info(vg):
     """Return free/used/total space info for a volume group in bytes
 
