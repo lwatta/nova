@@ -332,6 +332,42 @@ class LibvirtGenericVIFDriver(object):
 
         return conf
 
+    def get_config_n1kv_hybrid(self, instance, vif, image_meta,
+                               inst_type, virt_type):
+        newvif = copy.deepcopy(vif)
+        newvif['network']['bridge'] = self.get_br_name(vif['id'])
+        return self.get_config_bridge(instance,
+                                      newvif,
+                                      image_meta,
+                                      inst_type,
+                                      virt_type)
+
+    def get_config_n1kv_ethernet(self, instance, vif, image_meta,
+                                 inst_type, virt_type):
+        conf = self.get_base_config(instance,
+                                    vif,
+                                    image_meta,
+                                    inst_type,
+                                    virt_type)
+
+        dev = self.get_vif_devname(vif)
+        designer.set_vif_host_backend_ethernet_config(conf, dev)
+
+        return conf
+
+    def get_config_n1kv(self, instance, vif, image_meta,
+                        inst_type, virt_type):
+        if self.get_firewall_required(vif) or vif.is_hybrid_plug_enabled():
+            return self.get_config_n1kv_hybrid(instance, vif,
+                                               image_meta,
+                                               inst_type,
+                                               virt_type)
+        else:
+            return self.get_config_n1kv_ethernet(instance, vif,
+                                                 image_meta,
+                                                 inst_type,
+                                                 virt_type)
+
     def get_config(self, instance, vif, image_meta,
                    inst_type, virt_type):
         vif_type = vif['type']
@@ -522,6 +558,42 @@ class LibvirtGenericVIFDriver(object):
         except processutils.ProcessExecutionError:
             LOG.exception(_LE("Failed while plugging vif"), instance=instance)
 
+    def plug_n1kv_ethernet(self, instance, vif):
+        iface_id = self.get_ovs_interfaceid(vif)
+        dev = self.get_vif_devname(vif)
+        linux_net.create_tap_dev(dev)
+        linux_net.create_n1kv_vif_port(dev, iface_id, vif['address'],
+                                       instance['uuid'])
+
+    def plug_n1kv_hybrid(self, instance, vif):
+        iface_id = self.get_ovs_interfaceid(vif)
+        br_name = self.get_br_name(vif['id'])
+        v1_name, v2_name = self.get_veth_pair_names(vif['id'])
+
+        if not linux_net.device_exists(br_name):
+            utils.execute('brctl', 'addbr', br_name, run_as_root=True)
+            utils.execute('brctl', 'setfd', br_name, 0, run_as_root=True)
+            utils.execute('brctl', 'stp', br_name, 'off', run_as_root=True)
+            utils.execute('tee',
+                          ('/sys/class/net/%s/bridge/multicast_snooping' %
+                           br_name),
+                          process_input='0',
+                          run_as_root=True,
+                          check_exit_code=[0, 1])
+
+        if not linux_net.device_exists(v2_name):
+            linux_net._create_veth_pair(v1_name, v2_name)
+            utils.execute('ip', 'link', 'set', br_name, 'up', run_as_root=True)
+            utils.execute('brctl', 'addif', br_name, v1_name, run_as_root=True)
+            linux_net.create_n1kv_vif_port(v2_name, iface_id, vif['address'],
+                                           instance['uuid'])
+
+    def plug_n1kv(self, instance, vif):
+        if self.get_firewall_required(vif) or vif.is_hybrid_plug_enabled():
+            self.plug_n1kv_hybrid(instance, vif)
+        else:
+            self.plug_n1kv_ethernet(instance, vif)
+
     def plug(self, instance, vif):
         vif_type = vif['type']
 
@@ -668,6 +740,39 @@ class LibvirtGenericVIFDriver(object):
         except processutils.ProcessExecutionError:
             LOG.exception(_LE("Failed while unplugging vif"),
                           instance=instance)
+
+    def unplug_n1kv_ethernet(self, instance, vif):
+        """Unplug the VIF by deleting the port from the bridge."""
+        try:
+            linux_net.delete_n1kv_vif_port(self.get_vif_devname(vif))
+        except processutils.ProcessExecutionError:
+            LOG.exception(_LE("Failed while unplugging vif"),
+                          instance=instance)
+
+    def unplug_n1kv_hybrid(self, instance, vif):
+        """UnPlug using hybrid strategy (same as OVS)
+
+        Unhook port from N1KV, unhook port from bridge, delete
+        bridge, and delete both veth devices.
+        """
+        try:
+            br_name = self.get_br_name(vif['id'])
+            v1_name, v2_name = self.get_veth_pair_names(vif['id'])
+
+            utils.execute('brctl', 'delif', br_name, v1_name, run_as_root=True)
+            utils.execute('ip', 'link', 'set', br_name, 'down',
+                          run_as_root=True)
+            utils.execute('brctl', 'delbr', br_name, run_as_root=True)
+            linux_net.delete_n1kv_vif_port(v2_name)
+        except processutils.ProcessExecutionError:
+            LOG.exception(_LE("Failed while unplugging vif"),
+                          instance=instance)
+
+    def unplug_n1kv(self, instance, vif):
+        if self.get_firewall_required(vif) or vif.is_hybrid_plug_enabled():
+            self.unplug_n1kv_hybrid(instance, vif)
+        else:
+            self.unplug_n1kv_ethernet(instance, vif)
 
     def unplug(self, instance, vif):
         vif_type = vif['type']

@@ -1355,6 +1355,20 @@ def delete_ivs_vif_port(dev):
                   run_as_root=True)
 
 
+def create_n1kv_vif_port(dev, iface_id, mac, instance_id):
+    cmd = ('vemctl', 'add-port', '--name', dev,
+           '--type', 'virt',
+           '--id', iface_id,
+           '--attached-mac', mac,
+           '--vm-id', instance_id)
+    utils.execute(*cmd, run_as_root=True)
+
+
+def delete_n1kv_vif_port(dev):
+    cmd = ('vemctl', 'del-port', '--name', dev)
+    utils.execute(*cmd, run_as_root=True)
+
+
 def create_tap_dev(dev, mac_address=None):
     if not device_exists(dev):
         try:
